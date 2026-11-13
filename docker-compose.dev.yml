@@ -1,0 +1,29 @@
+# Local development without Keycloak: http://localhost:8089
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build wow-dev
+# A fake login proxy (dev/fake-auth.conf) replaces oauth2-proxy. Never deploy this file.
+services:
+  wow-dev:
+    image: nginx:1.29-alpine
+    container_name: wow-dev
+    volumes:
+      - ./dev/fake-auth.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:8089:80"
+    networks:
+      - wow-dev-net
+      - wow-internal
+    depends_on:
+      wow-web:
+        condition: service_healthy
+
+  wow-api:
+    volumes: !override
+      - ./data-dev:/data
+
+networks:
+  # local stand-in for the external nginx-proxy network; wow-internal is internal, so the
+  # published port needs a second, normal network
+  wow-dev-net: {}
+  nginx-proxy:
+    name: wow-dev-proxy
+    external: false
