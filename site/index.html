@@ -86,7 +86,7 @@ label.chk{display:inline-flex;gap:6px;align-items:center;font-size:.88rem;color:
 .item-title{font-size:1.35rem;font-weight:600;margin:0;line-height:1.2}
 .facts{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.86rem;color:var(--muted)}
 .facts b{color:var(--fg);font-weight:500}
-.qty{display:flex;align-items:center;gap:6px}
+.qty{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .qty input{width:72px;text-align:right;font-variant-numeric:tabular-nums}
 .banner{border-left:3px solid var(--accent);background:var(--accent-soft);padding:8px 12px;border-radius:0 4px 4px 0;font-size:.92rem}
 .banner.warn{border-color:var(--warn);background:var(--warn-bg)}
@@ -110,6 +110,18 @@ label.chk{display:inline-flex;gap:6px;align-items:center;font-size:.88rem;color:
 .node{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:baseline}
 .node .by{font-size:.78rem;color:var(--muted)}
 details>summary{cursor:pointer;color:var(--muted);font-size:.88rem}
+/* shopping list: every row starts with the character who does it */
+.entries{display:flex;flex-wrap:wrap;gap:6px}
+.entry{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:4px;padding:2px 2px 2px 3px;background:var(--bg);font-size:.88rem;max-width:100%}
+.entry input{width:54px;text-align:right;padding:2px 4px;font-variant-numeric:tabular-nums}
+.prows{display:flex;flex-direction:column}
+.prow{display:grid;grid-template-columns:minmax(64px,120px) 44px minmax(0,1fr) auto;gap:6px;align-items:baseline;font-size:.9rem;padding:3px 0;border-bottom:1px dotted var(--line)}
+.prow:last-child{border-bottom:0}
+.prow,.ln{overflow-wrap:anywhere}
+@media (max-width:500px){.prow{grid-template-columns:minmax(52px,84px) 34px minmax(0,1fr) auto;gap:5px}}
+.who-n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who-n.none{color:var(--warn);font-weight:500}
+.onlist{font-size:.82rem;color:var(--muted)}
 a{color:var(--accent)}
 .foot{font-size:.8rem;color:var(--muted);max-width:90ch}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -151,6 +163,7 @@ a{color:var(--accent)}
     </div>
 
     <div class="col">
+      <section class="panel" id="shop" aria-labelledby="h-shop"></section>
       <section class="panel" id="plan" aria-live="polite"></section>
       <p class="foot">Daten: Vanilla-Rezepte aus den Open-Source-Datensätzen <i>wow-classic-items</i> und <i>vmangos</i>, deutsche Namen aus den Spieldaten (Suche funktioniert auch englisch). Neue WoW-Forever-Rezepte (z. B. von der Azeroth Commerce Authority bzw. Durotar Supply and Logistics) sind nicht enthalten. Mengen bei Rezepten mit Zufallsertrag sind mit dem Mindestertrag gerechnet.</p>
     </div>
@@ -242,8 +255,16 @@ document.addEventListener("click",ev=>{
   else if(t.id==="cCancel"){ state.editing=null; renderEditor(); }
   else if(t.dataset.pick){ select(+t.dataset.pick); }
   else if(t.id==="more"){ state.limit+=200; renderList(); }
+  else if(t.dataset.shopadd){ addToShop(+t.dataset.shopadd, state.qty); }
+  else if(t.dataset.shoprm){ shop=shop.filter(e=>e.i!==+t.dataset.shoprm); shopChanged(); }
+  else if(t.id==="clearShop"){ if(confirm("Einkaufs- und Farmliste leeren?")){ shop=[]; shopChanged(); } }
 });
 document.addEventListener("change",ev=>{
+  if(ev.target.dataset.shopqty){
+    const e=shop.find(x=>x.i===+ev.target.dataset.shopqty);
+    if(e){ e.qty=Math.max(1,Math.min(999,parseInt(ev.target.value)||1)); shopChanged(); }
+    return;
+  }
   if(ev.target.name==="prof"){
     const f=document.getElementById("charForm"); const sel=[...f.querySelectorAll('input[name=prof]:checked')].map(x=>x.value);
     const prim=sel.filter(p=>PRIMARY.includes(p));
@@ -297,8 +318,9 @@ function pickRecipe(id){
 }
 function gatherer(g){ const p=GATHER[g].prof; return p? (charsWith(p)[0]||null):null; }
 
-function buildPlan(rootRecipe, qty){
-  const steps=new Map();   // key recipe.i -> {r, char, crafts, made}
+// entries: [{r: recipe, qty}] — one item or the whole shopping list; totals are summed across all roots
+function buildPlan(entries){
+  const steps=new Map();   // key recipe.i -> {r, char, crafts, depth}
   const farm=new Map();    // charId|"_none" -> Map(itemId -> {qty,g})
   const mail=new Map();    // "from>to>item" -> qty
   const notes=[];
@@ -308,7 +330,7 @@ function buildPlan(rootRecipe, qty){
     const k=owner?owner.id:"_"+g; if(!farm.has(k)) farm.set(k,new Map());
     const m=farm.get(k); const cur=m.get(id)||{qty:0,g}; cur.qty+=q; m.set(id,cur);
   }
-  function resolve(id,need,consumer,path,isRoot,r0){
+  function resolve(id,need,consumer,path,isRoot,r0,depth=0){
     const it=I(id);
     const r = r0 || pickRecipe(id);
     const crafter = r? crafterFor(r.prof):null;
@@ -317,12 +339,13 @@ function buildPlan(rootRecipe, qty){
     const expand = r && !path.has(id) && !gatherRaw && (isRoot || crafter || state.expandAll);
     if(expand){
       const crafts=Math.ceil(need/r.yMin);
-      const st=steps.get(r.i)||{r,char:crafter,crafts:0}; st.crafts+=crafts; steps.set(r.i,st);
+      // depth = deepest position in any tree; crafting deepest first keeps intermediates before their consumers
+      const st=steps.get(r.i)||{r,char:crafter,crafts:0,depth:0}; st.crafts+=crafts; st.depth=Math.max(st.depth,depth); steps.set(r.i,st);
       if(!crafter && !notes.includes(r.prof)) notes.push(r.prof);
       if(consumer && crafter && consumer.id!==crafter.id) add(mail,`${crafter.id}>${consumer.id}>${id}`,need);
       const p2=new Set(path); p2.add(id);
       const node={id,need,crafts,r,char:crafter,kids:[]};
-      for(const [rid,amt] of r.reag) node.kids.push(resolve(rid,amt*crafts,crafter||consumer,p2,false));
+      for(const [rid,amt] of r.reag) node.kids.push(resolve(rid,amt*crafts,crafter||consumer,p2,false,null,depth+1));
       return node;
     }
     // raw / bought
@@ -333,8 +356,54 @@ function buildPlan(rootRecipe, qty){
     if(owner && consumer && owner.id!==consumer.id) add(mail,`${owner.id}>${consumer.id}>${id}`,need);
     return {id,need,raw:true,how,owner,r};
   }
-  const root=resolve(rootRecipe.item, qty*rootRecipe.yMin, null, new Set(), true, rootRecipe);
-  return {steps,farm,mail,notes,root};
+  const roots=entries.map(({r,qty})=>resolve(r.item, qty*r.yMin, null, new Set(), true, r));
+  return {steps,farm,mail,notes,root:roots[0]};
+}
+const craftOrder = steps => [...steps].sort((a,b)=>b.depth-a.depth);
+
+// ---------- shopping list ----------
+let shop = loadShop();
+function loadShop(){
+  const raw=load("wfw.list",[]);
+  return (Array.isArray(raw)?raw:[]).map(e=>{
+    // stored with item id so the list survives a data update that shifts recipe indices
+    let r=recipes[e.i]; if(!r||r.item!==e.item){ const alt=byProduct.get(e.item); r=alt?alt[0]:null; }
+    return r? {i:r.i,item:r.item,qty:Math.max(1,Math.min(999,parseInt(e.qty)||1))}:null;
+  }).filter(Boolean);
+}
+function shopChanged(){ try{ localStorage.setItem("wfw.list",JSON.stringify(shop)); }catch(e){} renderShop(); renderPlan(); }
+function addToShop(i,qty){
+  const e=shop.find(x=>x.i===i);
+  if(e) e.qty=Math.min(999,e.qty+qty); else shop.push({i,item:recipes[i].item,qty});
+  shopChanged();
+}
+const BUY = new Set(["V","AH","X","C"]);
+function prow(c,qty,inner,tag){
+  return `<div class="prow"><span class="who-n ${c?"":"none"}">${c?esc(c.name):"Niemand"}</span><span class="n">${qty}×</span><span style="min-width:0">${inner}</span>${tag}</div>`;
+}
+function renderShop(){
+  const host=document.getElementById("shop");
+  const head=`<div class="panel-head"><h2 id="h-shop">Einkaufs- &amp; Farmliste</h2>${shop.length?`<button class="ghost" id="clearShop">Liste leeren</button>`:""}</div>`;
+  if(!shop.length){ host.innerHTML=head+`<div class="hint">Noch leer. Wähle ein Rezept und klicke „+ Auf Liste“. Hier steht dann für alle Items zusammen, welcher Charakter wie viel farmen, kaufen und herstellen muss.</div>`; return; }
+  const P=buildPlan(shop.map(e=>({r:recipes[e.i],qty:e.qty})));
+  const pos=new Map(chars.map((c,k)=>[c.id,k]));
+  const byChar=(a,b)=>(a.c?pos.get(a.c.id):1e9)-(b.c?pos.get(b.c.id):1e9);
+  const farm=[], buy=[];
+  for(const [k,m] of P.farm){
+    const c=k.startsWith("_")? null : chars.find(x=>x.id===k)||null;
+    for(const [id,{qty,g}] of m) (BUY.has(g)?buy:farm).push({c,id,qty,g,name:I(id).name});
+  }
+  const sortRows=rows=>rows.sort((a,b)=>byChar(a,b)||a.g.localeCompare(b.g)||a.name.localeCompare(b.name));
+  const rowsHtml=rows=>`<div class="prows">${sortRows(rows).map(x=>prow(x.c,x.qty,itemLink(x.id),tagFor(x.g))).join("")}</div>`;
+  const crafts=craftOrder(P.steps.values()).map(s=>prow(s.char,s.crafts,itemLink(s.r.item),`<span class="tag">${esc(s.r.prof)}</span>`));
+  const nameOf=id=>esc(chars.find(c=>c.id===id)?.name||"?");
+  const mails=[...P.mail].map(([k,q])=>{ const [a,b,id]=k.split(">"); return `<div><b>${nameOf(a)}</b><span class="arrow">→</span><b>${nameOf(b)}</b><span class="n">${q}×</span>${itemLink(id)}</div>`; });
+  host.innerHTML = head + `
+    <div class="entries">${shop.map(e=>{ const it=I(e.item); return `<span class="entry"><input type="number" min="1" max="999" value="${e.qty}" data-shopqty="${e.i}" aria-label="Anzahl ${esc(it.name)}">× ${itemLink(e.item)}<button class="ghost" data-shoprm="${e.i}" aria-label="${esc(it.name)} von der Liste nehmen">✕</button></span>`; }).join("")}</div>
+    ${farm.length? `<div class="sec"><h3>Farmen</h3>${rowsHtml(farm)}</div>`:""}
+    ${buy.length? `<div class="sec"><h3>Kaufen <span style="text-transform:none;letter-spacing:0;font-weight:400">· Händler, AH oder selbst looten</span></h3>${rowsHtml(buy)}</div>`:""}
+    ${crafts.length? `<div class="sec"><h3>Herstellen (in dieser Reihenfolge)</h3><div class="prows">${crafts.join("")}</div></div>`:""}
+    ${mails.length? `<div class="sec"><h3>Post verschicken</h3><div class="mail">${mails.join("")}</div></div>`:""}`;
 }
 
 function tagFor(g){
@@ -350,7 +419,8 @@ function select(i){ state.sel=i; state.qty=1; renderPlan(); renderList(); if(inn
 function renderPlan(){
   const host=document.getElementById("plan");
   if(state.sel==null){ host.innerHTML=`<div class="empty"><h2>Item auswählen</h2><p>Wähle links ein Rezept. Hier steht dann, welcher Charakter was farmen, herstellen und verschicken muss.</p></div>`; return; }
-  const r=recipes[state.sel], it=I(r.item), P=buildPlan(r,state.qty);
+  const r=recipes[state.sel], it=I(r.item), P=buildPlan([{r,qty:state.qty}]);
+  const onShop=shop.find(e=>e.i===r.i);
   const crafter=crafterFor(r.prof);
   const recipeIt = r.recipeItem? I(r.recipeItem):null;
   const facts=[
@@ -371,7 +441,7 @@ function renderPlan(){
     if(groups.farm.length) out.push(`<div class="sec"><h3>Farmen</h3>${groups.farm.join("")}</div>`);
     if(groups.drop.length) out.push(`<div class="sec"><h3>Looten / AH</h3>${groups.drop.join("")}</div>`);
     if(groups.buy.length) out.push(`<div class="sec"><h3>Beim Händler kaufen</h3>${groups.buy.join("")}</div>`);
-    if(st.length) out.push(`<div class="sec"><h3>Herstellen (in dieser Reihenfolge)</h3>${st.reverse().map(s=>ln(s.crafts,itemLink(s.r.item),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div>`);
+    if(st.length) out.push(`<div class="sec"><h3>Herstellen (in dieser Reihenfolge)</h3>${craftOrder(st).map(s=>ln(s.crafts,itemLink(s.r.item),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div>`);
     return `<div class="card"><div class="card-h"><span class="nm">${esc(c.name)}</span><span class="hint">${esc(c.profs.join(", "))}</span></div><div class="card-b">${out.join("")}</div></div>`;
   }).join("");
   // unassigned
@@ -380,7 +450,7 @@ function renderPlan(){
     un.flatMap(([k,m])=>[...m].map(([id,{qty,g}])=>ln(qty,itemLink(id),tagFor(g)))).join("")}</div></div></div>`:"";
   const noCraftSteps=[...P.steps.values()].filter(s=>!s.char);
   const noCraftCard = noCraftSteps.length? `<div class="card"><div class="card-h"><span class="nm">Handwerker gesucht</span><span class="hint">Beruf fehlt bei deinen Chars</span></div><div class="card-b"><div class="sec">${
-    noCraftSteps.reverse().map(s=>ln(s.crafts,itemLink(s.r.item),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div></div></div>`:"";
+    craftOrder(noCraftSteps).map(s=>ln(s.crafts,itemLink(s.r.item),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div></div></div>`:"";
   // mail
   const nameOf=id=>esc(chars.find(c=>c.id===id)?.name||"?");
   const mails=[...P.mail].map(([k,q])=>{ const [a,b,id]=k.split(">"); return `<div><b>${nameOf(a)}</b><span class="arrow">→</span><b>${nameOf(b)}</b><span class="n">${q}×</span>${itemLink(id)}</div>`; });
@@ -399,7 +469,7 @@ function renderPlan(){
         ${it.en&&it.en!==it.name?`<div class="hint">${esc(it.en)}</div>`:""}
         <div class="facts">${facts.map(([k,v])=>`<span>${k}: <b>${esc(v)}</b></span>`).join("")}<span><a href="${WH(it.id)}" target="_blank" rel="noopener">Wowhead (DE)</a></span></div>
       </div>
-      <div class="qty"><label for="qty" class="hint">Anzahl</label><input type="number" id="qty" min="1" max="999" value="${state.qty}"></div>
+      <div class="qty"><label for="qty" class="hint">Anzahl</label><input type="number" id="qty" min="1" max="999" value="${state.qty}"><button class="primary" data-shopadd="${r.i}">+ Auf Liste</button>${onShop?`<span class="onlist">auf der Liste: ${onShop.qty}×</span>`:""}</div>
     </div>
     ${crafter? `<div class="banner"><b>${esc(crafter.name)}</b> stellt das Item her (${esc(r.prof)} ${r.skill}).</div>`
              : `<div class="banner warn">Keiner deiner Charaktere hat <b>${esc(r.prof)}</b>. Du kannst die Materialien sammeln und einen Handwerker beauftragen.</div>`}
@@ -416,7 +486,7 @@ function renderPlan(){
   document.getElementById("expandAll").addEventListener("change",e=>{ state.expandAll=e.target.checked; renderPlan(); });
 }
 
-function renderAll(){ renderChars(); renderList(); renderPlan(); }
+function renderAll(){ renderChars(); renderList(); renderShop(); renderPlan(); }
 document.getElementById("stats").textContent = `${recipes.length} Rezepte · ${Object.keys(PROF_DE).length} Herstellungsberufe`;
 // open with a realistic example: first Blacksmithing recipe that uses mined bars
 state.sel = recipes.find(r=>I(r.item).name==="Ornate Mithril Boots")?.i ?? recipes.find(r=>r.prof==="Schmiedekunst")?.i ?? null;
