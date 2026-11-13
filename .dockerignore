@@ -4,3 +4,8 @@ docs/
 deploy.sh
 README.md
 .git
+api/
+data/
+data-dev/
+dev/
+docker-compose*.yml
