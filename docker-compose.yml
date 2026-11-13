@@ -1,15 +1,35 @@
-# Crafting site ("Forever Werkbank") at https://wow.kuckelsberg.de behind a Keycloak login.
+# Forever Werkbank at https://wow.kuckelsberg.de behind a Keycloak login, multi-user.
 # Pattern: same as /home/luna/srv/spoolman and /home/luna/srv/luna-docs (oauth2-proxy in front).
-# Keycloak: realm kuckelsberg, confidential client "wow". Secrets in .env (jupiter only).
+# Keycloak: realm kuckelsberg, confidential client "wow", access only for group /gamers.
+# Secrets in .env (jupiter only). Per-user data in ./data (SQLite, never rsync over it).
+#
+# Trust boundary: wow-api trusts the X-Forwarded-User/-Groups headers that wow-auth injects
+# (oauth2-proxy strips client-supplied copies). That is only safe because wow-web and wow-api
+# live exclusively in the internal network wow-internal, which no other container joins.
 
 services:
+  wow-api:
+    build: ./api
+    image: crafting-site-api:local
+    container_name: wow-api
+    restart: unless-stopped
+    environment:
+      - REQUIRED_GROUP=/gamers
+    volumes:
+      - ./data:/data
+    networks:
+      - wow-internal
+
   wow-web:
     build: .
     image: crafting-site:local
     container_name: wow-web
     restart: unless-stopped
     networks:
-      - nginx-proxy
+      - wow-internal
+    depends_on:
+      wow-api:
+        condition: service_healthy
 
   wow-auth:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
@@ -25,6 +45,12 @@ services:
       - OAUTH2_PROXY_UPSTREAMS=http://wow-web:80
       - OAUTH2_PROXY_REDIRECT_URL=https://wow.kuckelsberg.de/oauth2/callback
       - OAUTH2_PROXY_EMAIL_DOMAINS=*
+      # Group membership mapper on the client: claim "groups", full path
+      - OAUTH2_PROXY_ALLOWED_GROUPS=/gamers
+      # Stable Keycloak user id as X-Forwarded-User (default would be the email)
+      - OAUTH2_PROXY_USER_ID_CLAIM=sub
+      # Allows /oauth2/sign_out?rd=<Keycloak logout URL>
+      - OAUTH2_PROXY_WHITELIST_DOMAINS=auth.kuckelsberg.de
       - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
       - OAUTH2_PROXY_REVERSE_PROXY=true
       - OAUTH2_PROXY_COOKIE_SECURE=true
@@ -37,6 +63,7 @@ services:
       - NETWORK_ACCESS=external
     networks:
       - nginx-proxy
+      - wow-internal
     depends_on:
       wow-web:
         condition: service_healthy
@@ -44,3 +71,5 @@ services:
 networks:
   nginx-proxy:
     external: true
+  wow-internal:
+    internal: true
