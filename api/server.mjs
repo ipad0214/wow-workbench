@@ -5,7 +5,8 @@
 import http from "node:http";
 import { mkdirSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { parseArmory, slugFor, ArmoryUnreadable, PROFESSIONS, RULESETS } from "./armory.mjs";
+import { parseArmory, slugFor, ArmoryUnreadable } from "./armory.mjs";
+import { validate, Bad } from "./validate.mjs";
 import { createAh, AhUnavailable } from "./ah.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -35,59 +36,6 @@ const ah = createAh({
 const getState = db.prepare("SELECT data, updated_at FROM state WHERE user_id = ?");
 const putState = db.prepare(`INSERT INTO state(user_id, username, data, updated_at) VALUES(?,?,?,?)
   ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, data=excluded.data, updated_at=excluded.updated_at`);
-
-// ---------- validation ----------
-class Bad extends Error {}
-const str = (v, max, { min = 0 } = {}) => {
-  if (typeof v !== "string" || v.length < min || v.length > max) throw new Bad("invalid string");
-  return v;
-};
-const int = (v, lo, hi) => {
-  if (!Number.isInteger(v) || v < lo || v > hi) throw new Bad("invalid number");
-  return v;
-};
-const arr = (v, max) => {
-  if (!Array.isArray(v) || v.length > max) throw new Bad("invalid list");
-  return v;
-};
-const PROF_NAMES = new Set(Object.values(PROFESSIONS));
-const REALMS = new Set(Object.values(RULESETS));
-const realm = v => { if (!REALMS.has(v)) throw new Bad("invalid realm"); return v; };
-const skills = v => {
-  if (!v || typeof v !== "object" || Array.isArray(v)) throw new Bad("invalid skills");
-  const entries = Object.entries(v);
-  if (entries.length > 12) throw new Bad("invalid skills");
-  return Object.fromEntries(entries.map(([p, s]) => {
-    if (!PROF_NAMES.has(p)) throw new Bad("invalid skills");
-    arr(s, 2);
-    return [p, [int(s[0], 0, 450), int(s[1], 0, 450)]];
-  }));
-};
-function validate(body) {
-  if (!body || typeof body !== "object") throw new Bad("invalid body");
-  return {
-    chars: arr(body.chars, 50).map(c => ({
-      id: str(c?.id, 40, { min: 1 }),
-      name: str(c?.name, 40, { min: 1 }),
-      cls: str(c?.cls ?? "", 20),
-      race: str(c?.race ?? "", 20),
-      profs: arr(c?.profs ?? [], 12).map(p => str(p, 30)),
-      // filled from the armory; manual characters don't have them
-      ...(c?.surname != null && { surname: str(c.surname, 24) }),
-      ...(c?.level != null && { level: int(c.level, 0, 80) }),
-      ...(c?.skills != null && { skills: skills(c.skills) }),
-      ...(c?.syncedAt != null && { syncedAt: str(c.syncedAt, 30) }),
-      ...(c?.realm != null && { realm: realm(c.realm) }),
-    })),
-    // realm type the AH prices come from; unset: taken from the characters
-    ...(body.realm != null && { realm: realm(body.realm) }),
-    list: arr(body.list ?? [], 200).map(e => ({
-      i: int(e?.i, 0, 1e6),
-      item: int(e?.item, -1e7, 1e7),
-      qty: int(e?.qty, 1, 999),
-    })),
-  };
-}
 
 // ---------- identity ----------
 function identity(req) {

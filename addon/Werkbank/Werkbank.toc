@@ -1,0 +1,13 @@
+## Interface: 16001, 120105, 120100, 120001, 120000
+## Title: Werkbank
+## Notes: Einkaufs- und Farmliste der Forever Werkbank, mit dem Bestand deiner Charaktere aus Taschen, Bank und Post.
+## Author: Forever Werkbank
+## Version: 1.0.0
+## SavedVariables: WerkbankDB
+## IconTexture: Interface\Icons\Trade_BlackSmithing
+
+Codec.lua
+Net.lua
+Scan.lua
+Core.lua
+UI.lua

@@ -17,13 +17,16 @@ Internet → nginx-proxy (TLS) → wow-auth (oauth2-proxy, group /gamers) ─┐
 | Path | Purpose |
 |---|---|
 | `site/index.html` | The app (data + UI in one file) |
+| `site/sync.js` | List export (`WB1`), stock import (`WC1`) and the netting of owned items; shared logic with the addon |
 | `nginx/default.conf` | Static files, `/api/` → wow-api, gzip, security headers, `/healthz` |
 | `api/server.mjs` | Per-account storage: `GET /api/me`, `GET/PUT /api/state`; armory lookup `GET /api/armory`; AH prices `GET /api/prices`. `node:http` + `node:sqlite`, no npm dependencies |
-| `api/armory.mjs`, `api/ah.mjs`, `api/test/` | Armory page parser, AH price cache, and their tests (`node --test "api/test/*.test.mjs"`, Node ≥ 22.5 for `node:sqlite`) |
+| `api/armory.mjs`, `api/ah.mjs`, `api/validate.mjs`, `api/test/` | Armory page parser, AH price cache, state validation, and their tests (`node --test "api/test/*.test.mjs"`, Node ≥ 22.5 for `node:sqlite`) |
+| `addon/Werkbank/`, `addon/build.sh` | The in-game addon; `build.sh` packs it into `site/addon/Werkbank.zip` (the download on the page, not in git) |
+| `test/sync/`, `test/addon/` | Shared fixtures for `site/sync.js` and the addon (`node --test test/sync/`, `lua test/sync/run.lua`), addon smoke test (`lua test/addon/smoke.lua`) |
 | `docker-compose.yml` | `wow-api`, `wow-web`, `wow-auth` |
 | `docker-compose.dev.yml`, `dev/` | Local development with a fake login (see below) |
 | `.env.example` | Secrets template; the real `.env` lives only on jupiter (chmod 600) |
-| `deploy.sh` | rsync to jupiter (never `.env` or `data/`) + `docker compose up -d --build` |
+| `deploy.sh` | builds the addon zip, rsync to jupiter (never `.env` or `data/`) + `docker compose up -d --build` |
 
 ## Access: Keycloak groups
 
@@ -89,6 +92,29 @@ price, vendor goods have no price and are named).
   e.g. `https://$WOW_HOST`). Put `BNET_CLIENT_ID` and `BNET_CLIENT_SECRET` into `.env` on jupiter; it
   only reads public game data. Without a key, or when Blizzard is unreachable, `/api/prices` answers
   503/502 and the page simply shows no prices ("AH-Preise nicht verfügbar").
+
+## In-game addon (Werkbank)
+
+Blizzard exposes no bags or bank through any API, so the counts come from an addon. Addons can't
+reach the network; the data moves as text (details and format: `docs/addon-sync.md`):
+
+- **Page → game:** "Für Addon kopieren" copies the shopping list as a `WB1` string (recipes, crafters,
+  who farms what; no amounts owned). In game: `/werkbank import`, Ctrl+V.
+- **In game:** `/werkbank` shows Farmen / Kaufen / Herstellen / Post with `have/need` per row, live while
+  looting. Counted: bags, bank (once opened with the addon), mailbox (once opened), and mail sent to an
+  own character while it is on its way. Item tooltips show `Werkbank: 34/60`.
+- **Game → page:** `/werkbank export` (copy the `WC1` string) and paste it under "Bestand aus WoW …", or
+  pick `WTF/Account/<ACCOUNT>/SavedVariables/Werkbank.lua` (Chrome/Edge remember the file; then
+  "Aus WoW laden" is one click). The page keeps only items that occur in a recipe and stores them in the
+  account (`stock`: at most 20 characters × 600 items).
+- **Netting:** owned items are used first at every step, finished items included (5 of 20 bandages
+  owned → 15 to make). Counts are account-wide: who holds the items is in the row's tooltip, but no
+  extra mail line is planned for them. The single-recipe plan on the right stays without stock.
+- WoW Forever runs on the modern retail client (Midnight API). The interface number in
+  `Werkbank.toc` comes from one guide; check it in game with `/dump (select(4, GetBuildInfo()))`.
+  Checklist for a new client version: `docs/addon-ingame-check.md`.
+- Friends download the addon with "Addon herunterladen" in the page header (`/addon/Werkbank.zip`) and unpack it into
+  `Interface/AddOns` of their Forever client.
 
 ## Security note
 

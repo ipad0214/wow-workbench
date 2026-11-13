@@ -1,3 +1,5 @@
 .env
 data/
 data-dev/
+# built by addon/build.sh
+site/addon/

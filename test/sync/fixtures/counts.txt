@@ -1,0 +1,6 @@
+# What the addon exports (WC1): characters sorted by name, items by id, empty characters kept.
+t 1763000300
+char Ulfrik 1763000100 2840=3,2770=10
+char Ränka 1763000200 2589=40
+char Leer 1763000250
+wc1 WC1;1763000300;Leer:1763000250:,Ränka:1763000200:2589*40,Ulfrik:1763000100:2770*10+2840*3;4c06

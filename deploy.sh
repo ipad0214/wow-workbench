@@ -6,9 +6,13 @@ HOST="${DEPLOY_HOST:-jupiter}"
 REMOTE_DIR="/home/luna/srv/crafting-site"
 cd "$(dirname "$0")"
 
+# the addon download on the website (site/addon/Werkbank.zip, not in git)
+addon/build.sh
+
 # Excluded paths are also protected from --delete, so the user data in data/ stays untouched.
 rsync -av --delete \
   --exclude '.env' --exclude '.git/' --exclude 'docs/' --exclude '.DS_Store' \
+  --exclude '/addon/' --exclude '/test/' \
   --exclude 'data/' --exclude 'data-dev/' --exclude 'dev/' --exclude 'docker-compose.dev.yml' \
   ./ "$HOST:$REMOTE_DIR/"
 

@@ -1,0 +1,38 @@
+# Ulfrik (0) mines and smelts, Ränka (1) crafts item 100 from 2 bars and 1 thread from the vendor.
+list WB1;1763000000;Ulfrik,Ränka;100:2;100:1:1:0:2840*2+2320*1,2840:1:0:0:2770*1;2770:M:0,2320:V:c
+
+case nothing owned
+stock
+craft 100 1 2 2 0 0
+craft 2840 0 4 4 0 1
+farm 0 2770 M 4 0
+farm 1 2320 V 2 0
+mail 0 1 2840 4
+
+case a finished item and a bar owned: the list asks for one less, the bar saves one ore
+stock 100=1,2840=1
+craft 100 1 1 2 1 0
+craft 2840 0 1 2 1 1
+farm 0 2770 M 1 0
+farm 1 2320 V 1 0
+mail 0 1 2840 1
+
+case everything finished: nothing left to do, no children
+stock 100=5
+craft 100 1 0 2 2 0
+
+case only ore owned, more than needed
+stock 2770=10
+craft 100 1 2 2 0 0
+craft 2840 0 4 4 0 1
+farm 0 2770 M 4 4
+farm 1 2320 V 2 0
+mail 0 1 2840 4
+
+case items that are not on the list are ignored
+stock 9999=3
+craft 100 1 2 2 0 0
+craft 2840 0 4 4 0 1
+farm 0 2770 M 4 0
+farm 1 2320 V 2 0
+mail 0 1 2840 4
