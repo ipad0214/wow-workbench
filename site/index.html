@@ -58,6 +58,8 @@ label.chk{display:inline-flex;gap:6px;align-items:center;font-size:.88rem;color:
 .chips{display:flex;flex-wrap:wrap;gap:5px}
 .chip{font-size:.78rem;padding:1px 7px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);white-space:nowrap}
 .chip.p{border-color:var(--accent);background:var(--accent-soft)}
+.chip .lvl{font-family:var(--f-mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+.sync{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
 .editor{border:1px dashed var(--accent);border-radius:5px;padding:10px;display:flex;flex-direction:column;gap:10px;background:var(--bg)}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .row>input,.row>select{flex:1 1 140px}
@@ -77,6 +79,7 @@ label.chk{display:inline-flex;gap:6px;align-items:center;font-size:.88rem;color:
 .li-sub{font-size:.76rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .who{font-size:.74rem;padding:1px 6px;border-radius:9px;background:var(--panel-2);color:var(--muted);white-space:nowrap}
 .who.ok{background:var(--accent-soft);color:var(--fg)}
+.who.low{background:var(--warn-bg);color:var(--warn)}
 .more{padding:8px;text-align:center}
 .count{font-size:.82rem;color:var(--muted)}
 .q0{color:var(--q0)}.q1{color:var(--q1)}.q2{color:var(--q2)}.q3{color:var(--q3)}.q4{color:var(--q4)}.q5{color:var(--q5)}
@@ -162,6 +165,7 @@ a{color:var(--accent)}
             <option value="level">nach Item-Level</option>
           </select>
           <label class="chk"><input type="checkbox" id="fMine"> nur meine Berufe</label>
+          <label class="chk" title="Ein Charakter hat den Beruf mit genug Skill. Charaktere ohne Arsenal-Daten zählen als fähig."><input type="checkbox" id="fNow"> jetzt herstellbar</label>
           <label class="chk"><input type="checkbox" id="fReag"> auch Zutaten durchsuchen</label>
         </div>
         <div class="list" id="list" role="listbox" aria-label="Rezeptliste"></div>
@@ -215,8 +219,57 @@ const PRESETS = [
   {name:"Gnom-Schurke",cls:"Schurke",race:"Gnom",profs:["Alchemie","Ingenieurskunst"]}
 ];
 let chars = [];
-let state = {sel:null, qty:1, limit:150, expandAll:false, editing:null};
+let state = {sel:null, qty:1, limit:150, expandAll:false, editing:null, syncing:new Set(), syncErr:{}};
 const charsWith = prof => chars.filter(c=>c.profs.includes(prof));
+const skillOf = (c,prof) => c.skills?.[prof]?.[0];   // undefined: unknown (character without armory data)
+// points missing for a recipe; 0 when the skill is enough or unknown
+const skillGap = (c,r) => { const s=skillOf(c,r.prof); return s==null||s>=r.skill? 0 : r.skill-s; };
+const fullName = c => c.surname? `${c.name} ${c.surname}` : c.name;
+
+// ---------- armory (WoW Forever, fetched by wow-api) ----------
+const ARMORY_STALE = 6*3600*1000;
+const slugOf = (name,surname) => `${name}-${surname}`.toLocaleLowerCase("de");
+const armoryUrl = c => "https://worldofwarcraft.blizzard.com/de-de/forever/eu/armory/character/"+encodeURIComponent(slugOf(c.name,c.surname));
+async function armoryLookup(name, surname){
+  const a = await api("GET", `/api/armory?name=${encodeURIComponent(name)}&surname=${encodeURIComponent(surname)}`);
+  if(!a) throw new Error("Charakter nicht im Arsenal gefunden");
+  return a;
+}
+const orderProfs = ps => [...PRIMARY,...SECONDARY].filter(p=>ps.includes(p));
+// armory data wins over what was entered by hand; id stays
+const fromArmory = (c,a) => ({...c, name:a.name, surname:a.surname, race:a.race||c.race, cls:a.cls||c.cls, level:a.level,
+  profs:orderProfs(Object.keys(a.skills)), skills:a.skills, syncedAt:new Date().toISOString(), syncedFor:slugOf(a.name,a.surname)});
+// armory data in the editor only counts while name + surname are still the ones it was loaded for
+const armoryFits = e => !!e.skills && e.syncedFor===slugOf(e.name,e.surname||"");
+// returns true when the character changed; the caller saves and renders
+async function syncChar(id){
+  const c0 = chars.find(c=>c.id===id); if(!c0?.surname || state.syncing.has(id)) return false;
+  state.syncing.add(id); delete state.syncErr[id]; renderChars();
+  try{
+    const a = await armoryLookup(c0.name, c0.surname);
+    const i = chars.findIndex(c=>c.id===id);   // the list may have changed while waiting
+    if(i<0) return false;
+    const {syncedFor, ...c} = fromArmory(chars[i], a); chars[i] = c;
+    return true;
+  }catch(e){
+    if(!expire(e)) state.syncErr[id] = e.message;
+    return false;
+  }finally{ state.syncing.delete(id); }
+}
+async function syncOne(id){ if(await syncChar(id)){ save(); renderAll(); } else renderChars(); }
+async function syncStale(){
+  // one after another, so a whole account doesn't hit the armory at once; save and render once at the end
+  let changed=false;
+  for(const c of [...chars]){
+    if(store.status==="expired") break;
+    if(c.surname && (!c.syncedAt || Date.now()-Date.parse(c.syncedAt) > ARMORY_STALE)) changed = await syncChar(c.id) || changed;
+  }
+  if(changed){ save(); renderAll(); } else renderChars();
+}
+function ago(iso){
+  const m = Math.round((Date.now()-Date.parse(iso))/60000);
+  return m<1? "gerade eben" : m<60? `vor ${m} Min.` : m<48*60? `vor ${Math.round(m/60)} Std.` : `vor ${Math.round(m/1440)} Tagen`;
+}
 
 // ---------- per-account storage (wow-api behind oauth2-proxy) ----------
 // status: loading | ok | saving | error | expired | failed (initial load failed: never write then,
@@ -224,13 +277,15 @@ const charsWith = prof => chars.filter(c=>c.profs.includes(prof));
 const LEGACY_KEYS = ["wfw.chars","wfw.list"];   // browser-only storage before multi-user
 const store = {status:"loading", user:"", logoutUrl:"", updatedAt:null, dirty:false, inflight:false, again:false, timer:null, note:""};
 class AuthError extends Error {}
+// session gone: show it once in the header; true when e was that case
+function expire(e){ if(!(e instanceof AuthError)) return false; store.status="expired"; renderSession(); return true; }
 async function api(method, path, body){
   const res = await fetch(path, {method, credentials:"same-origin", cache:"no-store",
     headers: body? {"Content-Type":"application/json", Accept:"application/json"} : {Accept:"application/json"},
     body: body? JSON.stringify(body) : undefined});
   if(res.status===401 || res.status===403) throw new AuthError(String(res.status));
   if(res.status===404) return null;
-  if(!res.ok) throw new Error("HTTP "+res.status);
+  if(!res.ok) throw new Error((await res.json().catch(()=>null))?.error || "HTTP "+res.status);
   return res.json();
 }
 function readLegacy(){
@@ -258,6 +313,7 @@ async function loadAccount(){
     store.status = "ok";
   }catch(e){ store.status = e instanceof AuthError? "expired" : "failed"; }
   renderAll();
+  if(store.status==="ok") syncStale();
 }
 function save(){
   if(store.status==="failed" || store.status==="expired" || store.status==="loading") return;
@@ -280,7 +336,7 @@ async function refreshFromServer(){
   try{
     const d = await api("GET","/api/state");
     if(d && d.updatedAt!==store.updatedAt){ applyState(d); renderAll(); }
-  }catch(e){ if(e instanceof AuthError){ store.status="expired"; renderSession(); } }
+  }catch(e){ expire(e); }
 }
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") refreshFromServer(); });
 addEventListener("pagehide",()=>{
@@ -313,21 +369,37 @@ function renderChars(){
   host.innerHTML = (store.note?`<div class="banner">${esc(store.note)}</div>`:"") + (chars.length? chars.map(c=>`
     <div class="char">
       <div class="char-top">
-        <div><span class="char-name">${esc(c.name)}</span> <span class="char-meta">${esc([c.race,c.cls].filter(Boolean).join(" "))}</span></div>
-        <div><button class="ghost" data-edit="${c.id}">Bearbeiten</button><button class="ghost" data-del="${c.id}" aria-label="${esc(c.name)} entfernen">✕</button></div>
+        <div><span class="char-name">${esc(fullName(c))}</span> <span class="char-meta">${esc([c.level?`Stufe ${c.level}`:"",c.race,c.cls].filter(Boolean).join(" "))}</span></div>
+        <div><button class="ghost" data-edit="${c.id}">Bearbeiten</button><button class="ghost" data-del="${c.id}" aria-label="${esc(fullName(c))} entfernen">✕</button></div>
       </div>
-      <div class="chips">${c.profs.map(p=>`<span class="chip ${PRIMARY.includes(p)?"p":""}">${esc(p)}</span>`).join("")||'<span class="hint">keine Berufe</span>'}</div>
+      <div class="chips">${c.profs.map(p=>profChip(c,p)).join("")||'<span class="hint">keine Berufe</span>'}</div>
+      ${c.surname? syncLine(c) : ""}
     </div>`).join("") : '<div class="hint">Noch keine Charaktere. Lege einen an oder nimm einen Vorschlag.</div>');
   const left = PRESETS.filter(p=>!chars.some(c=>c.name===p.name));
   pre.innerHTML = left.length? '<span class="hint">Vorschläge:</span>'+left.map((p,i)=>`<button data-preset="${PRESETS.indexOf(p)}">+ ${esc(p.name)} <span class="hint">(${p.profs.join(", ")})</span></button>`).join("") : "";
-  renderEditor();
 }
-function renderEditor(){
+function profChip(c,p){
+  const s=c.skills?.[p];
+  return `<span class="chip ${PRIMARY.includes(p)?"p":""}">${esc(p)}${s?` <span class="lvl">${s[0]}/${s[1]}</span>`:""}</span>`;
+}
+function syncLine(c){
+  const busy=state.syncing.has(c.id), err=state.syncErr[c.id];
+  return `<div class="sync hint">Arsenal: ${busy?"lädt …":c.syncedAt?ago(c.syncedAt):"noch nicht geladen"}
+    <button class="ghost" data-sync="${c.id}" ${busy?"disabled":""}>Aktualisieren</button>
+    <a href="${armoryUrl(c)}" target="_blank" rel="noopener">im Arsenal öffnen</a>
+    ${err?`<span class="warn-t">${esc(err)}</span>`:""}</div>`;
+}
+// Only editor events render the editor, so background renders (sync, other tab) never touch what's typed
+function renderEditor(focusId="cName"){
   const host=document.getElementById("editorHost");
   const e=state.editing; if(!e){ host.innerHTML=""; return; }
   const box = p => `<label class="chk"><input type="checkbox" name="prof" value="${p}" ${e.profs.includes(p)?"checked":""}> ${p}</label>`;
   host.innerHTML = `<form class="editor" id="charForm">
     <div class="row"><input type="text" id="cName" placeholder="Name" value="${esc(e.name)}" aria-label="Name" required>
+      <input type="text" id="cSurname" placeholder="Nachname (fürs Arsenal)" value="${esc(e.surname||"")}" aria-label="Nachname">
+      <button type="button" id="cArmory">Aus Arsenal laden</button></div>
+    ${armoryFits(e)?`<div class="hint">Aus dem Arsenal: Stufe ${e.level} · ${Object.entries(e.skills).map(([p,[s,m]])=>`${esc(p)} ${s}/${m}`).join(" · ")||"keine Berufe"}</div>`:""}
+    <div class="row">
       <select id="cRace" aria-label="Volk"><option value="">Volk</option>${RACES.map(r=>`<option ${r===e.race?"selected":""}>${r}</option>`).join("")}</select>
       <select id="cCls" aria-label="Klasse"><option value="">Klasse</option>${CLASSES.map(r=>`<option ${r===e.cls?"selected":""}>${r}</option>`).join("")}</select></div>
     <h3>Hauptberufe (max. 2)</h3><div class="profpick">${PRIMARY.map(box).join("")}</div>
@@ -335,12 +407,42 @@ function renderEditor(){
     <div id="cErr"></div>
     <div class="row"><button class="primary" type="submit">Speichern</button><button type="button" id="cCancel">Abbrechen</button></div>
   </form>`;
-  document.getElementById("cName").focus();
+  document.getElementById(focusId).focus();
+}
+const editorErr = msg => { document.getElementById("cErr").innerHTML = msg? `<div class="err">${esc(msg)}</div>` : ""; };
+function readEditor(){
+  const f=document.getElementById("charForm"), e=state.editing;
+  e.name=document.getElementById("cName").value.trim();
+  e.surname=document.getElementById("cSurname").value.trim();
+  e.race=document.getElementById("cRace").value; e.cls=document.getElementById("cCls").value;
+  e.profs=[...f.querySelectorAll('input[name=prof]:checked')].map(x=>x.value);
+  return e;
+}
+async function editorArmory(){
+  const e=readEditor();
+  if(!e.name || !e.surname){ editorErr("Für das Arsenal brauche ich Name und Nachname des Charakters."); document.getElementById(e.name?"cSurname":"cName").focus(); return; }
+  const btn=document.getElementById("cArmory");
+  btn.disabled=true; btn.textContent="lädt …"; editorErr("");
+  try{
+    const a=await armoryLookup(e.name,e.surname);
+    if(state.editing!==e) return;   // editor closed meanwhile
+    readEditor(); Object.assign(e, fromArmory(e,a)); renderEditor("cArmory");
+  }catch(err){
+    if(state.editing!==e) return;
+    editorErr(expire(err)? "Sitzung abgelaufen, bitte neu anmelden." : err.message);
+    btn.disabled=false; btn.textContent="Aus Arsenal laden";
+  }
 }
 document.addEventListener("click",ev=>{
   const t=ev.target.closest("button"); if(!t) return;
-  if(t.id==="addChar"){ state.editing={id:null,name:"",race:"",cls:"",profs:[]}; renderEditor(); }
-  else if(t.dataset.edit){ state.editing=structuredClone(chars.find(c=>c.id===t.dataset.edit)); renderEditor(); }
+  if(t.id==="addChar"){ state.editing={id:null,name:"",surname:"",race:"",cls:"",profs:[]}; renderEditor(); }
+  else if(t.id==="cArmory"){ editorArmory(); }
+  else if(t.dataset.sync){ syncOne(t.dataset.sync); }
+  else if(t.dataset.edit){
+    const e=structuredClone(chars.find(c=>c.id===t.dataset.edit));
+    if(e.skills) e.syncedFor=slugOf(e.name,e.surname||"");   // stored armory data belongs to this name
+    state.editing=e; renderEditor();
+  }
   else if(t.dataset.del){ chars=chars.filter(c=>c.id!==t.dataset.del); save(); renderAll(); }
   else if(t.dataset.preset){ const p=PRESETS[+t.dataset.preset]; chars.push({...structuredClone(p),id:"c"+Date.now()}); save(); renderAll(); }
   else if(t.id==="cCancel"){ state.editing=null; renderEditor(); }
@@ -358,34 +460,58 @@ document.addEventListener("change",ev=>{
     return;
   }
   if(ev.target.name==="prof"){
-    const f=document.getElementById("charForm"); const sel=[...f.querySelectorAll('input[name=prof]:checked')].map(x=>x.value);
-    const prim=sel.filter(p=>PRIMARY.includes(p));
-    document.getElementById("cErr").innerHTML = prim.length>2? '<div class="err">Ein Charakter kann nur zwei Hauptberufe haben.</div>':"";
+    const prim=readEditor().profs.filter(p=>PRIMARY.includes(p));
+    editorErr(prim.length>2? "Ein Charakter kann nur zwei Hauptberufe haben." : "");
   }
 });
 document.addEventListener("submit",ev=>{
   if(ev.target.id!=="charForm") return; ev.preventDefault();
-  const f=ev.target; const sel=[...f.querySelectorAll('input[name=prof]:checked')].map(x=>x.value);
-  if(sel.filter(p=>PRIMARY.includes(p)).length>2){ document.getElementById("cErr").innerHTML='<div class="err">Bitte höchstens zwei Hauptberufe wählen.</div>'; return; }
-  const name=document.getElementById("cName").value.trim(); if(!name) return;
-  const c={id:state.editing.id||("c"+Date.now()),name,race:document.getElementById("cRace").value,cls:document.getElementById("cCls").value,profs:[...PRIMARY,...SECONDARY].filter(p=>sel.includes(p))};
+  const e=readEditor();
+  if(e.profs.filter(p=>PRIMARY.includes(p)).length>2){ editorErr("Bitte höchstens zwei Hauptberufe wählen."); return; }
+  if(!e.name) return;
+  const c={id:e.id||("c"+Date.now()),name:e.name,race:e.race,cls:e.cls,profs:orderProfs(e.profs)};
+  if(e.surname) c.surname=e.surname;
+  const loaded = armoryFits(e);
+  if(loaded){
+    c.level=e.level; c.syncedAt=e.syncedAt;
+    c.skills=Object.fromEntries(Object.entries(e.skills).filter(([p])=>c.profs.includes(p)));
+  }
   const i=chars.findIndex(x=>x.id===c.id); if(i>=0) chars[i]=c; else chars.push(c);
-  state.editing=null; save(); renderAll();
+  state.editing=null; save(); renderAll(); renderEditor();
+  if(c.surname && !loaded) syncOne(c.id);   // name or surname changed, or never loaded: fetch in the background
 });
 
 // ---------- catalogue ----------
 const fProf=document.getElementById("fProf");
 fProf.innerHTML = '<option value="">Alle Berufe</option>'+Object.values(PROF_DE).map(p=>`<option>${p}</option>`).join("");
-for(const id of ["q","fProf","fSort","fMine","fReag"]) document.getElementById(id).addEventListener("input",()=>{state.limit=150;renderList();});
+for(const id of ["q","fProf","fSort","fMine","fNow","fReag"]) document.getElementById(id).addEventListener("input",()=>{state.limit=150;renderList();});
 
-function crafterFor(prof){ return charsWith(prof)[0]||null; }
+// the character with the highest known skill; characters without armory data rank below known ones
+function crafterFor(prof){
+  let best=null, bestS=-2;
+  for(const c of charsWith(prof)){ const s=skillOf(c,prof)??-1; if(s>bestS){ best=c; bestS=s; } }
+  return best;
+}
+function whoChip(c,r){
+  if(!c) return '<span class="who">–</span>';
+  const gap=skillGap(c,r), s=skillOf(c,r.prof);
+  return gap? `<span class="who low" title="${esc(c.name)}: ${esc(r.prof)} ${s}, braucht ${r.skill}">${esc(c.name)} −${gap}</span>`
+            : `<span class="who ok">${esc(c.name)}</span>`;
+}
+const gapNote = (c,r) => { const g=skillGap(c,r); return g? ` <span class="warn-t">· fehlen ${g} Punkte</span>`:""; };
+function crafterBanner(c,r){
+  const gap=skillGap(c,r), s=skillOf(c,r.prof);
+  if(gap) return `<div class="banner warn"><b>${esc(c.name)}</b> kann das Item ab ${esc(r.prof)} ${r.skill} herstellen (jetzt ${s}, fehlen ${gap} Punkte).</div>`;
+  return `<div class="banner"><b>${esc(c.name)}</b> stellt das Item her (${esc(r.prof)} ${s!=null?`${s}, braucht ${r.skill}`:r.skill}).</div>`;
+}
 function renderList(){
   const q=document.getElementById("q").value.trim().toLowerCase();
-  const prof=fProf.value, mine=document.getElementById("fMine").checked, reag=document.getElementById("fReag").checked, sort=document.getElementById("fSort").value;
+  const prof=fProf.value, mine=document.getElementById("fMine").checked, now=document.getElementById("fNow").checked, reag=document.getElementById("fReag").checked, sort=document.getElementById("fSort").value;
   const myProfs=new Set(chars.flatMap(c=>c.profs));
   let rs=recipes.filter(r=>{
     if(prof && r.prof!==prof) return false;
     if(mine && !myProfs.has(r.prof)) return false;
+    if(now && !charsWith(r.prof).some(c=>!skillGap(c,r))) return false;
     if(!q) return true;
     if(hit(r.item,q)) return true;
     return reag && r.reag.some(([id])=>hit(id,q));
@@ -399,7 +525,7 @@ function renderList(){
     return `<button class="li" role="option" data-pick="${r.i}" aria-selected="${state.sel===r.i}">
       <span class="skill">${r.skill}</span>
       <span style="min-width:0"><div class="li-name q${it.q}">${esc(it.name)}</div><div class="li-sub">${esc(sub)}</div></span>
-      <span class="who ${c?"ok":""}">${c?esc(c.name):"–"}</span></button>`;
+      ${whoChip(c,r)}</button>`;
   }).join("") + (rs.length>state.limit?`<div class="more"><button id="more">${Math.min(200,rs.length-state.limit)} weitere anzeigen</button></div>`:"") || '<div class="empty">Kein Rezept passt zur Suche.</div>';
 }
 
@@ -532,7 +658,7 @@ function renderPlan(){
     if(groups.farm.length) out.push(`<div class="sec"><h3>Farmen</h3>${groups.farm.join("")}</div>`);
     if(groups.drop.length) out.push(`<div class="sec"><h3>Looten / AH</h3>${groups.drop.join("")}</div>`);
     if(groups.buy.length) out.push(`<div class="sec"><h3>Beim Händler kaufen</h3>${groups.buy.join("")}</div>`);
-    if(st.length) out.push(`<div class="sec"><h3>Herstellen (in dieser Reihenfolge)</h3>${craftOrder(st).map(s=>ln(s.crafts,itemLink(s.r.item),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div>`);
+    if(st.length) out.push(`<div class="sec"><h3>Herstellen (in dieser Reihenfolge)</h3>${craftOrder(st).map(s=>ln(s.crafts,itemLink(s.r.item)+gapNote(c,s.r),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div>`);
     return `<div class="card"><div class="card-h"><span class="nm">${esc(c.name)}</span><span class="hint">${esc(c.profs.join(", "))}</span></div><div class="card-b">${out.join("")}</div></div>`;
   }).join("");
   // unassigned
@@ -562,7 +688,7 @@ function renderPlan(){
       </div>
       <div class="qty"><label for="qty" class="hint">Anzahl</label><input type="number" id="qty" min="1" max="999" value="${state.qty}"><button class="primary" data-shopadd="${r.i}">+ Auf Liste</button>${onShop?`<span class="onlist">auf der Liste: ${onShop.qty}×</span>`:""}</div>
     </div>
-    ${crafter? `<div class="banner"><b>${esc(crafter.name)}</b> stellt das Item her (${esc(r.prof)} ${r.skill}).</div>`
+    ${crafter? crafterBanner(crafter,r)
              : `<div class="banner warn">Keiner deiner Charaktere hat <b>${esc(r.prof)}</b>. Du kannst die Materialien sammeln und einen Handwerker beauftragen.</div>`}
     <div class="facts"><span>Rezept: <b>${recipeIt? itemLink(recipeIt.id):"beim Lehrer"}</b>${recipeIt?srcLine(recipeIt.id):""}</span></div>
     ${r.tool? `<div class="facts"><span>Werkzeug: <b>${itemLink(r.tool)}</b> (wird nicht verbraucht)</span>${byProduct.get(r.tool)?`<button class="chip" data-pick="${byProduct.get(r.tool)[0].i}">Rezept dafür öffnen</button>`:""}</div>`:""}

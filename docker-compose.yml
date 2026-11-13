@@ -7,6 +7,8 @@
 # Trust boundary: wow-api trusts the X-Forwarded-User/-Groups headers that wow-auth injects
 # (oauth2-proxy strips client-supplied copies). That is only safe because wow-web and wow-api
 # live exclusively in the internal network wow-internal, which no other container joins.
+# wow-api additionally sits in wow-egress, its own network for outbound HTTPS to the WoW armory.
+# No other container may join wow-egress either, otherwise it could reach wow-api directly.
 
 services:
   wow-api:
@@ -21,6 +23,7 @@ services:
       - ./data:/data
     networks:
       - wow-internal
+      - wow-egress   # armory lookups (GET /api/armory); wow-api is the only member
 
   wow-web:
     build: .
@@ -75,3 +78,4 @@ networks:
     external: true
   wow-internal:
     internal: true
+  wow-egress: {}

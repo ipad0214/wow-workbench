@@ -10,13 +10,16 @@ Internet → nginx-proxy (TLS) → wow-auth (oauth2-proxy, group /gamers) ─┐
                          ┌─────────── network wow-internal (internal) ───┘
                          ▼
                       wow-web (nginx :80) ── /api/* ──► wow-api (Node 24 :3000) ── data/werkbank.db
+                                                            │
+                                         network wow-egress └──► WoW Forever armory (HTTPS)
 ```
 
 | Path | Purpose |
 |---|---|
 | `site/index.html` | The app (data + UI in one file) |
 | `nginx/default.conf` | Static files, `/api/` → wow-api, gzip, security headers, `/healthz` |
-| `api/server.mjs` | Per-account storage: `GET /api/me`, `GET/PUT /api/state`. `node:http` + `node:sqlite`, no npm dependencies |
+| `api/server.mjs` | Per-account storage: `GET /api/me`, `GET/PUT /api/state`; armory lookup `GET /api/armory`. `node:http` + `node:sqlite`, no npm dependencies |
+| `api/armory.mjs`, `api/test/` | Armory page parser and its tests (`node --test api/`) |
 | `docker-compose.yml` | `wow-api`, `wow-web`, `wow-auth` |
 | `docker-compose.dev.yml`, `dev/` | Local development with a fake login (see below) |
 | `.env.example` | Secrets template; the real `.env` lives only on jupiter (chmod 600) |
@@ -43,12 +46,34 @@ Credentials: temporary password → Groups: join `gamers`. Done; their character
   login in that browser, once, and then removed from the browser.
 - Two devices at the same time: last write wins; switching back to a tab reloads the current state.
 
+## Armory (WoW Forever)
+
+A character with a **surname** is linked to the WoW Forever armory. Forever characters are found by
+first name + surname (`…/forever/eu/armory/character/ulfrik-weißbart`), there is no realm; the
+first name alone gives 404.
+
+- `GET /api/armory?name=Ulfrik&surname=Weißbart` → `wow-api` loads the armory page and reads the
+  state the page embeds (`characterProfileInitialState`): level, class, race, professions with
+  skill points. Responses: 200, 404 (character not found), 400 (invalid name), 502 (armory unreachable
+  or the page changed).
+- This is the website's state, **not an official API**. If Blizzard changes the page, the lookup
+  returns 502 and characters can still be edited by hand. The parser is `api/armory.mjs`; its test
+  fixture is a trimmed copy of a real page.
+- Lookups are cached for 10 minutes per character, at most 2 run at once. The page refreshes
+  characters whose last sync is older than 6 hours, one after another, when it loads; the card has an
+  "Aktualisieren" button.
+- What the skills are used for: skill chips on the character card, the crafter with the highest
+  skill gets the recipe, the plan and the recipe list show missing points, filter
+  "jetzt herstellbar". Characters without armory data count as able to craft.
+- Base URL can be changed with `ARMORY_BASE` on wow-api (default: German page, EU region).
+
 ## Security note
 
 wow-api trusts the `X-Forwarded-User` / `X-Forwarded-Groups` headers. oauth2-proxy strips
 client-supplied copies and injects its own, and only wow-auth can reach wow-web/wow-api (network
-`wow-internal` is internal and has no other members). **Never** put wow-web or wow-api on another
-network.
+`wow-internal` is internal and has no other members). **Never** put wow-web on another network.
+wow-api is also in `wow-egress`, a network of its own for the armory lookups; **no other container may
+join `wow-egress`**, otherwise it could reach wow-api directly and fake the user headers.
 
 ## Update the app
 

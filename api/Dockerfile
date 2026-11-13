@@ -1,7 +1,7 @@
 FROM node:24-alpine
 
 WORKDIR /app
-COPY server.mjs .
+COPY server.mjs armory.mjs ./
 RUN mkdir -p /data && chown node:node /data
 ENV NODE_ENV=production NODE_NO_WARNINGS=1 DATA_DIR=/data PORT=3000
 # /data is a bind mount owned by the host user luna (uid 1000) = node user in this image
