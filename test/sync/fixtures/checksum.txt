@@ -1,0 +1,4 @@
+# <adler-32 in base 36> <text up to the end of the line>
+# "Wikipedia" is the textbook Adler-32 example: 0x11E60398 = 4ys6u0
+4ys6u0 Wikipedia
+hlkz1b Ränka;Weißbart
