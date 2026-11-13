@@ -81,6 +81,8 @@ test("createAh: parallel requests share one refresh", async () => {
 test("createAh: without a key it is off; with Blizzard down and no cache it is unavailable", async () => {
   const off = createAh({ db: new DatabaseSync(":memory:"), log: quiet });
   assert.equal(off.configured, false);
+  assert.equal(createAh({ clientId: "change-me", clientSecret: "change-me", db: new DatabaseSync(":memory:") }).configured, false);
+  assert.equal(createAh({ clientId: "Change me", clientSecret: "x", db: new DatabaseSync(":memory:") }).configured, false);
   await assert.rejects(off.prices([1]), AhUnavailable);
 
   let n = 0;

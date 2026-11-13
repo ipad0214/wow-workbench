@@ -44,7 +44,9 @@ async function readLimited(res) {
 
 export function createAh({ clientId, clientSecret, region = "eu", ruleset = 1, locale = "de_DE", db,
   fetch = globalThis.fetch, now = Date.now, log = console }) {
-  const configured = !!(clientId && clientSecret);
+  // the .env placeholder "change-me" counts as no key, so wow-api doesn't log in with it every 5 minutes
+  const isKey = v => !!v && !/^change[- ]?me$/i.test(v.trim());
+  const configured = isKey(clientId) && isKey(clientSecret);
   db.exec(`CREATE TABLE IF NOT EXISTS ah_house(
       id INTEGER PRIMARY KEY, faction TEXT NOT NULL, name TEXT NOT NULL,
       last_modified TEXT, updated_at TEXT, listings INTEGER NOT NULL DEFAULT 0);
