@@ -1,7 +1,8 @@
-# Forever Werkbank at https://wow.kuckelsberg.de behind a Keycloak login, multi-user.
+# Forever Werkbank at https://${WOW_HOST} behind a Keycloak login, multi-user.
 # Pattern: same as /home/luna/srv/spoolman and /home/luna/srv/luna-docs (oauth2-proxy in front).
-# Keycloak: realm kuckelsberg, confidential client "wow", access only for group /gamers.
-# Secrets in .env (jupiter only). Per-user data in ./data (SQLite, never rsync over it).
+# Keycloak: realm from OIDC_ISSUER_URL, confidential client "wow", access only for group /gamers.
+# Host names, contact address and secrets come from .env (server only, see .env.example).
+# Per-user data in ./data (SQLite, never rsync over it).
 #
 # Trust boundary: wow-api trusts the X-Forwarded-User/-Groups headers that wow-auth injects
 # (oauth2-proxy strips client-supplied copies). That is only safe because wow-web and wow-api
@@ -38,28 +39,28 @@ services:
     command: ["--trusted-proxy-ip=172.20.0.0/16"]
     environment:
       - OAUTH2_PROXY_PROVIDER=keycloak-oidc
-      - OAUTH2_PROXY_OIDC_ISSUER_URL=https://auth.kuckelsberg.de/realms/kuckelsberg
+      - OAUTH2_PROXY_OIDC_ISSUER_URL=${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in .env}
       - OAUTH2_PROXY_CLIENT_ID=wow
       - OAUTH2_PROXY_CLIENT_SECRET=${WOW_CLIENT_SECRET:?set WOW_CLIENT_SECRET in .env}
       - OAUTH2_PROXY_COOKIE_SECRET=${WOW_COOKIE_SECRET:?set WOW_COOKIE_SECRET in .env}
       - OAUTH2_PROXY_UPSTREAMS=http://wow-web:80
-      - OAUTH2_PROXY_REDIRECT_URL=https://wow.kuckelsberg.de/oauth2/callback
+      - OAUTH2_PROXY_REDIRECT_URL=https://${WOW_HOST:?set WOW_HOST in .env}/oauth2/callback
       - OAUTH2_PROXY_EMAIL_DOMAINS=*
       # Group membership mapper on the client: claim "groups", full path
       - OAUTH2_PROXY_ALLOWED_GROUPS=/gamers
       # Stable Keycloak user id as X-Forwarded-User (default would be the email)
       - OAUTH2_PROXY_USER_ID_CLAIM=sub
       # Allows /oauth2/sign_out?rd=<Keycloak logout URL>
-      - OAUTH2_PROXY_WHITELIST_DOMAINS=auth.kuckelsberg.de
+      - OAUTH2_PROXY_WHITELIST_DOMAINS=${AUTH_HOST:?set AUTH_HOST in .env}
       - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
       - OAUTH2_PROXY_REVERSE_PROXY=true
       - OAUTH2_PROXY_COOKIE_SECURE=true
       - OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
       - OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256
-      - VIRTUAL_HOST=wow.kuckelsberg.de
+      - VIRTUAL_HOST=${WOW_HOST}
       - VIRTUAL_PORT=4180
-      - LETSENCRYPT_HOST=wow.kuckelsberg.de
-      - LETSENCRYPT_EMAIL=patrick@kuckelsberg.de
+      - LETSENCRYPT_HOST=${WOW_HOST}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:?set LETSENCRYPT_EMAIL in .env}
       - NETWORK_ACCESS=external
     networks:
       - nginx-proxy

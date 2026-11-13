@@ -57,8 +57,8 @@ Edit, then run `./deploy.sh`. HTML is served with `Cache-Control: no-cache`, so 
 ## Local development
 
 ```bash
-WOW_CLIENT_SECRET=dev WOW_COOKIE_SECRET=dev \
-  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build wow-dev
+# .env.example only supplies placeholders; wow-auth isn't started in dev
+docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.dev.yml up -d --build wow-dev
 open http://localhost:8089          # logged in as "dev"
 # switch user in the browser console: document.cookie = "devuser=friend"
 ```
