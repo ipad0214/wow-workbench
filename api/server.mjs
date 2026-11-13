@@ -5,6 +5,7 @@
 import http from "node:http";
 import { mkdirSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { parseArmory, slugFor, ArmoryUnreadable, PROFESSIONS } from "./armory.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || "/data";
@@ -13,6 +14,10 @@ const REQUIRED_GROUP = process.env.REQUIRED_GROUP || ""; // defence in depth, e.
 const LOGOUT_URL = process.env.OIDC_ISSUER_URL ? `${process.env.OIDC_ISSUER_URL.replace(/\/$/, "")}/protocol/openid-connect/logout` : "";
 const MAX_BODY = 256 * 1024;
 const BACKUP_KEEP = 14;
+const ARMORY_BASE = process.env.ARMORY_BASE || "https://worldofwarcraft.blizzard.com/de-de/forever/eu/armory/character/";
+const ARMORY_MAX = 3 * 1024 * 1024;
+const ARMORY_TTL = 10 * 60 * 1000;
+const ARMORY_PARALLEL = 2;
 
 mkdirSync(`${DATA_DIR}/backup`, { recursive: true });
 const db = new DatabaseSync(`${DATA_DIR}/werkbank.db`);
@@ -37,6 +42,17 @@ const arr = (v, max) => {
   if (!Array.isArray(v) || v.length > max) throw new Bad("invalid list");
   return v;
 };
+const PROF_NAMES = new Set(Object.values(PROFESSIONS));
+const skills = v => {
+  if (!v || typeof v !== "object" || Array.isArray(v)) throw new Bad("invalid skills");
+  const entries = Object.entries(v);
+  if (entries.length > 12) throw new Bad("invalid skills");
+  return Object.fromEntries(entries.map(([p, s]) => {
+    if (!PROF_NAMES.has(p)) throw new Bad("invalid skills");
+    arr(s, 2);
+    return [p, [int(s[0], 0, 450), int(s[1], 0, 450)]];
+  }));
+};
 function validate(body) {
   if (!body || typeof body !== "object") throw new Bad("invalid body");
   return {
@@ -46,6 +62,11 @@ function validate(body) {
       cls: str(c?.cls ?? "", 20),
       race: str(c?.race ?? "", 20),
       profs: arr(c?.profs ?? [], 12).map(p => str(p, 30)),
+      // filled from the armory; manual characters don't have them
+      ...(c?.surname != null && { surname: str(c.surname, 24) }),
+      ...(c?.level != null && { level: int(c.level, 0, 80) }),
+      ...(c?.skills != null && { skills: skills(c.skills) }),
+      ...(c?.syncedAt != null && { syncedAt: str(c.syncedAt, 30) }),
     })),
     list: arr(body.list ?? [], 200).map(e => ({
       i: int(e?.i, 0, 1e6),
@@ -65,6 +86,51 @@ function identity(req) {
   }
   const name = String(req.headers["x-forwarded-preferred-username"] || req.headers["x-forwarded-email"] || "").slice(0, 80);
   return { id, name };
+}
+
+// ---------- armory ----------
+class NotFound extends Error {}
+const NAME_RE = /^\p{L}{2,24}$/u;
+const armoryCache = new Map(); // slug -> { at, promise }; the promise also merges parallel requests
+let armoryRunning = 0;
+const armoryWaiting = [];
+async function limited(fn) {
+  if (armoryRunning >= ARMORY_PARALLEL) await new Promise(r => armoryWaiting.push(r));
+  armoryRunning++;
+  try { return await fn(); } finally { armoryRunning--; armoryWaiting.shift()?.(); }
+}
+async function fetchArmory(slug) {
+  let res;
+  try {
+    res = await fetch(ARMORY_BASE + encodeURIComponent(slug), {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; werkbank)", "Accept": "text/html" },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e) { throw new ArmoryUnreadable(`fetch failed: ${e.message}`); }
+  if (!res.ok) {
+    res.body?.cancel().catch(() => {}); // release the connection, the error page isn't needed
+    // the armory answers 500 for characters that don't exist
+    if (res.status === 404 || res.status === 500) throw new NotFound();
+    throw new ArmoryUnreadable(`armory status ${res.status}`);
+  }
+  const chunks = []; let size = 0;
+  for await (const c of res.body) {
+    size += c.length;
+    if (size > ARMORY_MAX) throw new ArmoryUnreadable("page too large");
+    chunks.push(c);
+  }
+  return parseArmory(Buffer.concat(chunks).toString("utf8"),
+    unknown => console.warn(`armory ${slug}: unknown professions ${unknown.join(", ")}`));
+}
+function armory(name, surname) {
+  const slug = slugFor(name, surname);
+  const hit = armoryCache.get(slug);
+  if (hit && Date.now() - hit.at < ARMORY_TTL) return hit.promise;
+  for (const [k, v] of armoryCache) if (Date.now() - v.at >= ARMORY_TTL) armoryCache.delete(k);
+  const promise = limited(() => fetchArmory(slug));
+  armoryCache.set(slug, { at: Date.now(), promise });
+  promise.catch(() => armoryCache.delete(slug)); // only cache hits; retry after errors right away
+  return promise;
 }
 
 // ---------- http ----------
@@ -110,6 +176,20 @@ const server = http.createServer(async (req, res) => {
       const now = new Date().toISOString();
       putState.run(who.id, who.name, JSON.stringify(data), now);
       return send(res, 200, { updatedAt: now });
+    }
+    if (url.pathname === "/api/armory" && req.method === "GET") {
+      const name = url.searchParams.get("name") || "", surname = url.searchParams.get("surname") || "";
+      if (!NAME_RE.test(name) || !NAME_RE.test(surname)) return send(res, 400, { error: "Name und Nachname: nur Buchstaben, 2–24 Zeichen" });
+      try {
+        return send(res, 200, await armory(name, surname));
+      } catch (e) {
+        if (e instanceof NotFound) return send(res, 404, { error: "Charakter nicht im Arsenal gefunden" });
+        if (e instanceof ArmoryUnreadable) {
+          console.error(`armory ${slugFor(name, surname)}: ${e.message}`);
+          return send(res, 502, { error: "Arsenal nicht erreichbar oder nicht lesbar" });
+        }
+        throw e;
+      }
     }
     return send(res, 404, { error: "not found" });
   } catch (e) {
