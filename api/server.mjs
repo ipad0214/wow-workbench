@@ -6,6 +6,7 @@ import http from "node:http";
 import { mkdirSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { parseArmory, slugFor, ArmoryUnreadable, PROFESSIONS } from "./armory.mjs";
+import { createAh, AhUnavailable } from "./ah.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || "/data";
@@ -24,6 +25,13 @@ const db = new DatabaseSync(`${DATA_DIR}/werkbank.db`);
 db.exec(`PRAGMA journal_mode=WAL;
   CREATE TABLE IF NOT EXISTS state(
     user_id TEXT PRIMARY KEY, username TEXT, data TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+// auction house prices: a cache that can be rebuilt any time, so it lives outside werkbank.db and its backups
+const ahDb = new DatabaseSync(`${DATA_DIR}/ah-cache.db`);
+ahDb.exec("PRAGMA journal_mode=WAL");
+const ah = createAh({
+  clientId: process.env.BNET_CLIENT_ID, clientSecret: process.env.BNET_CLIENT_SECRET,
+  region: process.env.BNET_REGION || "eu", ruleset: Number(process.env.BNET_RULESET || 1), db: ahDb,
+});
 const getState = db.prepare("SELECT data, updated_at FROM state WHERE user_id = ?");
 const putState = db.prepare(`INSERT INTO state(user_id, username, data, updated_at) VALUES(?,?,?,?)
   ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, data=excluded.data, updated_at=excluded.updated_at`);
@@ -191,6 +199,17 @@ const server = http.createServer(async (req, res) => {
         throw e;
       }
     }
+    if (url.pathname === "/api/prices" && req.method === "GET") {
+      const raw = url.searchParams.get("ids") || "";
+      if (!/^\d{1,7}(,\d{1,7}){0,299}$/.test(raw)) return send(res, 400, { error: "ids: up to 300 item ids, comma separated" });
+      if (!ah.configured) return send(res, 503, { error: "no-key" });
+      try {
+        return send(res, 200, await ah.prices([...new Set(raw.split(",").map(Number))]));
+      } catch (e) {
+        if (e instanceof AhUnavailable) return send(res, 502, { error: "AH-Preise nicht verfügbar" });
+        throw e;
+      }
+    }
     return send(res, 404, { error: "not found" });
   } catch (e) {
     if (e instanceof Bad) return send(res, 400, { error: e.message });
@@ -212,7 +231,9 @@ function snapshot() {
 snapshot();
 setInterval(snapshot, 6 * 3600 * 1000).unref();
 
-server.listen(PORT, () => console.log(`werkbank api on :${PORT}`));
-const stop = () => server.close(() => { db.close(); process.exit(0); });
+server.listen(PORT, () => console.log(`werkbank api on :${PORT}${ah.configured ? "" : " (no Battle.net key: AH prices off)"}`));
+// fill the price cache in the background, so the first click doesn't wait for 10 house snapshots
+if (ah.configured) ah.ensureFresh().catch(e => console.error(`ah: ${e.message}`));
+const stop = () => server.close(() => { db.close(); ahDb.close(); process.exit(0); });
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);

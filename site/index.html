@@ -11,6 +11,7 @@
   --q0:#7b7b7b; --q1:#2a2f36; --q2:#1f7a0c; --q3:#0a5fb3; --q4:#7a2fb5; --q5:#c25f00;
   --g-H:#3d7d2a; --g-M:#7a5a2c; --g-S:#9a4b1e; --g-F:#1f6e8c; --g-D:#6b3fa0; --g-C:#5b6672; --g-V:#5d6b2e; --g-X:#8a3b3b;
   --warn:#9a5b00; --warn-bg:#fbeed6;
+  --m-g:#8a6d00; --m-s:#5f6a76; --m-c:#9a5a2e;
   --f-display:"Cinzel",Georgia,serif; --f-ui:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif; --f-mono:"IBM Plex Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
@@ -18,13 +19,13 @@
   --accent:#e08a3c; --accent-fg:#1a1208; --accent-soft:#3a2716;
   --q0:#9d9d9d; --q1:#f0f0f0; --q2:#3bd41a; --q3:#3d8ee8; --q4:#b56cf0; --q5:#ff8a1f;
   --g-H:#79c25c; --g-M:#c9a06a; --g-S:#e08a5a; --g-F:#5cb8d8; --g-D:#b18ae0; --g-C:#9aa6b2; --g-V:#b5c36a; --g-X:#e07a7a;
-  --warn:#f0b45a; --warn-bg:#3a2c12; color-scheme:dark }}
+  --warn:#f0b45a; --warn-bg:#3a2c12; --m-g:#e6c34a; --m-s:#c0c8d0; --m-c:#d9925f; color-scheme:dark }}
 :root[data-theme="dark"]{
   --bg:#12161b; --panel:#1a2027; --panel-2:#232b34; --line:#323c47; --fg:#e4e8ec; --muted:#93a0ad;
   --accent:#e08a3c; --accent-fg:#1a1208; --accent-soft:#3a2716;
   --q0:#9d9d9d; --q1:#f0f0f0; --q2:#3bd41a; --q3:#3d8ee8; --q4:#b56cf0; --q5:#ff8a1f;
   --g-H:#79c25c; --g-M:#c9a06a; --g-S:#e08a5a; --g-F:#5cb8d8; --g-D:#b18ae0; --g-C:#9aa6b2; --g-V:#b5c36a; --g-X:#e07a7a;
-  --warn:#f0b45a; --warn-bg:#3a2c12; color-scheme:dark }
+  --warn:#f0b45a; --warn-bg:#3a2c12; --m-g:#e6c34a; --m-s:#c0c8d0; --m-c:#d9925f; color-scheme:dark }
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:15px;line-height:1.45;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
@@ -125,6 +126,13 @@ details>summary{cursor:pointer;color:var(--muted);font-size:.88rem}
 .who-n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .who-n.none{color:var(--warn);font-weight:500}
 .onlist{font-size:.82rem;color:var(--muted)}
+/* AH prices */
+.money{font-family:var(--f-mono);font-size:.82rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mg{color:var(--m-g)}.ms{color:var(--m-s)}.mc{color:var(--m-c)}
+.price{font-size:.84rem;cursor:help}
+.price .hint{font-size:.74rem}
+.total{font-size:.9rem;padding-top:4px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.cmp{font-size:.9rem;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
 /* session */
 .hdr-r{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right}
 @media (max-width:600px){.hdr-r{align-items:flex-start;text-align:left}}
@@ -579,6 +587,129 @@ function buildPlan(entries){
 }
 const craftOrder = steps => [...steps].sort((a,b)=>b.depth-a.depth);
 
+// ---------- AH prices (wow-api caches Blizzard's Forever auction houses; off without a key) ----------
+const ALLIANCE=new Set(["Mensch","Zwerg","Nachtelf","Gnom"]), HORDE=new Set(["Orc","Untoter","Tauren","Troll"]);
+const FACTION_DE={A:"Allianz",H:"Horde"};
+const raceFaction = r => ALLIANCE.has(r)?"A":HORDE.has(r)?"H":null;
+// the row's character decides; otherwise the majority of the account's characters; null = both factions
+function factionFor(c){
+  const f=c&&raceFaction(c.race); if(f) return f;
+  let a=0,h=0; for(const x of chars){ const g=raceFaction(x.race); if(g==="A") a++; else if(g==="H") h++; }
+  return a>h?"A":h>a?"H":null;
+}
+const PRICE_TTL=60*1000;
+// status: idle | ok | off (no key or unreachable: no prices, no error, retry after 5 min)
+const ah={status:"idle", houses:new Map(), prices:new Map(), at:new Map(), pending:new Set(), queue:new Set(), timer:null, offUntil:0};
+function needPrices(ids){
+  if(Date.now()<ah.offUntil) return;
+  for(const id of ids) if(id>0 && !ah.pending.has(id) && !(Date.now()-(ah.at.get(id)||0)<PRICE_TTL)) ah.queue.add(id);
+  if(ah.queue.size && !ah.timer) ah.timer=setTimeout(flushPrices,0);   // one request for everything one render needs
+}
+async function flushPrices(){
+  const want=[...ah.queue]; ah.queue.clear(); ah.timer=null;
+  for(const id of want) ah.pending.add(id);
+  try{
+    for(let i=0;i<want.length;i+=300){
+      const ids=want.slice(i,i+300), d=await api("GET","/api/prices?ids="+ids.join(","));
+      if(!d) throw new Error("no prices");
+      for(const h of d.houses) ah.houses.set(h.id,h);
+      for(const id of ids){ ah.prices.set(id,d.prices[id]||{}); ah.at.set(id,Date.now()); }
+    }
+    ah.status="ok";
+  }catch(e){
+    if(expire(e)) return;
+    ah.status="off"; ah.offUntil=Date.now()+5*60*1000;
+  }finally{ for(const id of want) ah.pending.delete(id); }
+  renderPrices();
+}
+// don't replace an input the user is typing in; render once it loses focus
+function renderPrices(){
+  const a=document.activeElement;
+  if(a?.tagName==="INPUT" && a.closest("#plan,#shop")){ a.addEventListener("blur",()=>setTimeout(renderPrices),{once:true}); return; }
+  renderShop(); renderPlan();
+}
+const moneyTxt = c => {
+  c=Math.round(c); const g=Math.floor(c/1e4), s=Math.floor(c/100)%100, k=c%100, p=[];
+  if(g) p.push(g+"g"); if(s) p.push(s+"s"); if((k&&g<100)||!p.length) p.push(k+"c");
+  return p.join(" ");
+};
+const money = c => `<span class="money">${moneyTxt(c).replace(/(\d+)([gsc])/g,'<span class="m$2">$1$2</span>')}</span>`;
+function houseName(h){ return [...ah.houses.values()].some(x=>x.id!==h.id&&x.name===h.name)? `${h.name} #${h.id}` : h.name; }
+// cheapest offer in the faction's houses (both factions when f is null); null: not on offer; undefined: no data
+function priceOf(id,f){
+  const p=ah.prices.get(id); if(!p) return undefined;
+  let best=null;
+  for(const [hid,[unit,qty]] of Object.entries(p)){
+    const h=ah.houses.get(+hid); if(!h || (f && h.faction!==f)) continue;
+    if(!best || unit<best.unit) best={unit,qty,house:h};
+  }
+  return best;
+}
+// hover text: every Alliance/Horde house
+function priceTitle(id){
+  const p=ah.prices.get(id)||{};
+  return [...ah.houses.values()].sort((a,b)=>a.faction.localeCompare(b.faction)||a.id-b.id)
+    .map(h=>{ const x=p[h.id]; return `${FACTION_DE[h.faction]} · ${houseName(h)}: ${x? `${moneyTxt(x[0])} (${x[1]} Stk.)` : "nicht im AH"}`; }).join("\n");
+}
+const BUY_AH = g => g==="AH"||g==="X"||g==="C";   // vendor goods (V) have no AH price
+// "· à 16s 11c = 1g 93s 32c <house>" next to a buy row
+function priceNote(id,qty,f){
+  if(ah.status==="off") return "";
+  const p=priceOf(id,f); if(p===undefined) return "";
+  if(!p) return ` <span class="price hint" tabindex="0" title="${esc(priceTitle(id))}">· nicht im AH</span>`;
+  return ` <span class="price" tabindex="0" title="${esc(priceTitle(id))}">· ${qty>1?`à ${money(p.unit)} = ${money(p.unit*qty)}`:money(p.unit)} <span class="hint">${esc(houseName(p.house))}</span></span>`;
+}
+// rows: [{id,qty,f}]
+function totalLine(rows,label){
+  if(ah.status==="off") return "";
+  let sum=0, missing=0, known=false;
+  for(const x of rows){ const p=priceOf(x.id,x.f); if(p===undefined) continue; known=true; if(p) sum+=p.unit*x.qty; else missing++; }
+  if(!known) return "";
+  return `<div class="total">${label}: <b>≈ ${money(sum)}</b>${missing?`<span class="hint">${missing} Item${missing>1?"s":""} nicht im AH, nicht mitgezählt</span>`:""}</div>`;
+}
+function ahStatus(){
+  if(ah.status==="off") return `<div class="hint">AH-Preise nicht verfügbar</div>`;
+  const ts=[...ah.houses.values()].map(h=>Date.parse(h.updatedAt)).filter(Boolean);
+  if(!ts.length) return "";
+  return `<div class="hint">AH-Preise: Stand ${ago(new Date(Math.min(...ts)).toISOString())} · günstigstes Auktionshaus deiner Fraktion, mit der Maus auf einem Preis siehst du alle Häuser</div>`;
+}
+// material cost per crafted unit from the plan tree, per recipe index: raw materials at AH price
+// (also the farmed ones, as their value), intermediates with their own material cost
+function materialCosts(root,f){
+  const out=new Map();
+  function cost(n){   // cost of what this node needs, plus how many materials had no price
+    if(n.raw){
+      if(n.how==="V") return {sum:0,vendor:1,unpriced:0};
+      const p=priceOf(n.id,f); return p? {sum:p.unit*n.need,vendor:0,unpriced:0} : {sum:0,vendor:0,unpriced:1};
+    }
+    const t={sum:0,vendor:0,unpriced:0};
+    for(const k of n.kids){ const c=cost(k); t.sum+=c.sum; t.vendor+=c.vendor; t.unpriced+=c.unpriced; }
+    const per=t.sum/(n.crafts*n.r.yMin);   // kids cover all crafts; leftovers aren't charged to the consumer
+    if(!out.has(n.r.i)) out.set(n.r.i,{per,vendor:t.vendor,unpriced:t.unpriced});
+    return {...t, sum:per*n.need};
+  }
+  cost(root); return out;
+}
+const matExtra = m => (m.vendor?" + Händlerware":"")+(m.unpriced?` + ${m.unpriced} ohne AH-Preis`:"");
+// "· AH 2g 10s · Material 1g 40s" next to a craft step (per item)
+function craftNote(m,id,f){
+  if(ah.status==="off" || !m) return "";
+  const p=priceOf(id,f); if(p===undefined) return "";
+  return ` <span class="price hint" tabindex="0" title="${esc("Pro Stück. "+priceTitle(id))}">· AH ${p?money(p.unit):"–"} · Material ${money(m.per)}${esc(matExtra(m))}</span>`;
+}
+function craftCompare(m,id,f){
+  if(ah.status==="off" || !m) return "";
+  const p=priceOf(id,f); if(p===undefined) return "";
+  const complete=!m.vendor&&!m.unpriced;
+  let verdict="";
+  if(p && p.unit>m.per && complete) verdict=`<span>→ herstellen spart <b>${money(p.unit-m.per)}</b></span>`;
+  else if(p && p.unit<m.per) verdict=`<span>→ kaufen ist ${complete?"":"mindestens "}<b>${money(m.per-p.unit)}</b> günstiger</span>`;
+  return `<div class="cmp"><span class="hint">Kaufen oder herstellen, pro Stück:</span>
+    <span tabindex="0" class="price" title="${esc(priceTitle(id))}">AH ${p?`<b>${money(p.unit)}</b> <span class="hint">${esc(houseName(p.house))}</span>`:"nicht im AH"}</span>
+    <span>Material <b>${money(m.per)}</b>${m.vendor||m.unpriced?`<span class="hint">${esc(matExtra(m))}</span>`:""}</span>${verdict}</div>`;
+}
+function treeIds(n,out=new Set()){ out.add(n.id); for(const k of n.kids||[]) treeIds(k,out); return out; }
+
 // ---------- shopping list ----------
 let shop = [];
 function normalizeShop(raw){
@@ -611,16 +742,19 @@ function renderShop(){
     for(const [id,{qty,g}] of m) (BUY.has(g)?buy:farm).push({c,id,qty,g,name:I(id).name});
   }
   const sortRows=rows=>rows.sort((a,b)=>byChar(a,b)||a.g.localeCompare(b.g)||a.name.localeCompare(b.name));
-  const rowsHtml=rows=>`<div class="prows">${sortRows(rows).map(x=>prow(x.c,x.qty,itemLink(x.id),tagFor(x.g))).join("")}</div>`;
+  const rowsHtml=rows=>`<div class="prows">${sortRows(rows).map(x=>prow(x.c,x.qty,itemLink(x.id)+(BUY_AH(x.g)?priceNote(x.id,x.qty,factionFor(x.c)):""),tagFor(x.g))).join("")}</div>`;
+  const ahRows=buy.filter(x=>BUY_AH(x.g)).map(x=>({id:x.id,qty:x.qty,f:factionFor(x.c)}));
   const crafts=craftOrder(P.steps.values()).map(s=>prow(s.char,s.crafts,itemLink(s.r.item),`<span class="tag">${esc(s.r.prof)}</span>`));
   const nameOf=id=>esc(chars.find(c=>c.id===id)?.name||"?");
   const mails=[...P.mail].map(([k,q])=>{ const [a,b,id]=k.split(">"); return `<div><b>${nameOf(a)}</b><span class="arrow">→</span><b>${nameOf(b)}</b><span class="n">${q}×</span>${itemLink(id)}</div>`; });
   host.innerHTML = head + `
     <div class="entries">${shop.map(e=>{ const it=I(e.item); return `<span class="entry"><input type="number" min="1" max="999" value="${e.qty}" data-shopqty="${e.i}" aria-label="Anzahl ${esc(it.name)}">× ${itemLink(e.item)}<button class="ghost" data-shoprm="${e.i}" aria-label="${esc(it.name)} von der Liste nehmen">✕</button></span>`; }).join("")}</div>
     ${farm.length? `<div class="sec"><h3>Farmen</h3>${rowsHtml(farm)}</div>`:""}
-    ${buy.length? `<div class="sec"><h3>Kaufen <span style="text-transform:none;letter-spacing:0;font-weight:400">· Händler, AH oder selbst looten</span></h3>${rowsHtml(buy)}</div>`:""}
+    ${buy.length? `<div class="sec"><h3>Kaufen <span style="text-transform:none;letter-spacing:0;font-weight:400">· Händler, AH oder selbst looten</span></h3>${rowsHtml(buy)}${totalLine(ahRows,"Im AH kaufen")}</div>`:""}
     ${crafts.length? `<div class="sec"><h3>Herstellen (in dieser Reihenfolge)</h3><div class="prows">${crafts.join("")}</div></div>`:""}
-    ${mails.length? `<div class="sec"><h3>Post verschicken</h3><div class="mail">${mails.join("")}</div></div>`:""}`;
+    ${mails.length? `<div class="sec"><h3>Post verschicken</h3><div class="mail">${mails.join("")}</div></div>`:""}
+    ${ahRows.length? ahStatus():""}`;
+  needPrices(ahRows.map(x=>x.id));
 }
 
 function tagFor(g){
@@ -639,6 +773,9 @@ function renderPlan(){
   const r=recipes[state.sel], it=I(r.item), P=buildPlan([{r,qty:state.qty}]);
   const onShop=shop.find(e=>e.i===r.i);
   const crafter=crafterFor(r.prof);
+  const fPlan=factionFor(crafter), mats=materialCosts(P.root,fPlan);
+  const ahRows=[];   // for the total: every row priced in the AH
+  const priced=(id,qty,g,f)=>{ if(!BUY_AH(g)) return ""; ahRows.push({id,qty,f}); return priceNote(id,qty,f); };
   const recipeIt = r.recipeItem? I(r.recipeItem):null;
   const facts=[
     ["Beruf",`${r.prof} ${r.skill}`],
@@ -653,21 +790,21 @@ function renderPlan(){
     const f=P.farm.get(c.id); const st=[...P.steps.values()].filter(s=>s.char&&s.char.id===c.id);
     if(!f && !st.length) return "";
     const groups={farm:[],buy:[],drop:[]};
-    if(f) for(const [id,{qty,g}] of f){ const row=ln(qty,itemLink(id),tagFor(g)); (g==="V"?groups.buy:(g==="X"||g==="C"||g==="AH")?groups.drop:groups.farm).push(row); }
+    if(f) for(const [id,{qty,g}] of f){ const row=ln(qty,itemLink(id)+priced(id,qty,g,factionFor(c)),tagFor(g)); (g==="V"?groups.buy:BUY_AH(g)?groups.drop:groups.farm).push(row); }
     const out=[];
     if(groups.farm.length) out.push(`<div class="sec"><h3>Farmen</h3>${groups.farm.join("")}</div>`);
     if(groups.drop.length) out.push(`<div class="sec"><h3>Looten / AH</h3>${groups.drop.join("")}</div>`);
     if(groups.buy.length) out.push(`<div class="sec"><h3>Beim Händler kaufen</h3>${groups.buy.join("")}</div>`);
-    if(st.length) out.push(`<div class="sec"><h3>Herstellen (in dieser Reihenfolge)</h3>${craftOrder(st).map(s=>ln(s.crafts,itemLink(s.r.item)+gapNote(c,s.r),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div>`);
+    if(st.length) out.push(`<div class="sec"><h3>Herstellen (in dieser Reihenfolge)</h3>${craftOrder(st).map(s=>ln(s.crafts,itemLink(s.r.item)+gapNote(c,s.r)+(s.r.i!==r.i?craftNote(mats.get(s.r.i),s.r.item,fPlan):""),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div>`);
     return `<div class="card"><div class="card-h"><span class="nm">${esc(c.name)}</span><span class="hint">${esc(c.profs.join(", "))}</span></div><div class="card-b">${out.join("")}</div></div>`;
   }).join("");
   // unassigned
   const un=[...P.farm.entries()].filter(([k])=>k.startsWith("_"));
   const unCard = un.length? `<div class="card"><div class="card-h"><span class="nm">Niemand zugeordnet</span><span class="hint">kein passender Sammelberuf</span></div><div class="card-b"><div class="sec">${
-    un.flatMap(([k,m])=>[...m].map(([id,{qty,g}])=>ln(qty,itemLink(id),tagFor(g)))).join("")}</div></div></div>`:"";
+    un.flatMap(([k,m])=>[...m].map(([id,{qty,g}])=>ln(qty,itemLink(id)+priced(id,qty,g,factionFor(null)),tagFor(g)))).join("")}</div></div></div>`:"";
   const noCraftSteps=[...P.steps.values()].filter(s=>!s.char);
   const noCraftCard = noCraftSteps.length? `<div class="card"><div class="card-h"><span class="nm">Handwerker gesucht</span><span class="hint">Beruf fehlt bei deinen Chars</span></div><div class="card-b"><div class="sec">${
-    craftOrder(noCraftSteps).map(s=>ln(s.crafts,itemLink(s.r.item),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div></div></div>`:"";
+    craftOrder(noCraftSteps).map(s=>ln(s.crafts,itemLink(s.r.item)+(s.r.i!==r.i?craftNote(mats.get(s.r.i),s.r.item,fPlan):""),`<span class="tag">${esc(s.r.prof)}</span>`)).join("")}</div></div></div>`:"";
   // mail
   const nameOf=id=>esc(chars.find(c=>c.id===id)?.name||"?");
   const mails=[...P.mail].map(([k,q])=>{ const [a,b,id]=k.split(">"); return `<div><b>${nameOf(a)}</b><span class="arrow">→</span><b>${nameOf(b)}</b><span class="n">${q}×</span>${itemLink(id)}</div>`; });
@@ -690,10 +827,12 @@ function renderPlan(){
     </div>
     ${crafter? crafterBanner(crafter,r)
              : `<div class="banner warn">Keiner deiner Charaktere hat <b>${esc(r.prof)}</b>. Du kannst die Materialien sammeln und einen Handwerker beauftragen.</div>`}
+    ${craftCompare(mats.get(r.i),r.item,fPlan)}
     <div class="facts"><span>Rezept: <b>${recipeIt? itemLink(recipeIt.id):"beim Lehrer"}</b>${recipeIt?srcLine(recipeIt.id):""}</span></div>
     ${r.tool? `<div class="facts"><span>Werkzeug: <b>${itemLink(r.tool)}</b> (wird nicht verbraucht)</span>${byProduct.get(r.tool)?`<button class="chip" data-pick="${byProduct.get(r.tool)[0].i}">Rezept dafür öffnen</button>`:""}</div>`:""}
     ${it.cls==="Enchant"? `<div class="hint">Die Verzauberung wird auf ein Item in den Taschen des Verzauberers gewirkt. Seelengebundene Ausrüstung anderer Charaktere lässt sich nicht verschicken.</div>`:""}
     <div class="cards">${charCards}${noCraftCard}${unCard}</div>
+    ${totalLine(ahRows,"Im AH kaufen")}${ahStatus()}
     ${mails.length? `<div class="sec"><h3>Post verschicken</h3><div class="mail">${mails.join("")}</div></div>`:""}
     <div class="sec"><div class="panel-head"><h3>Materialbaum</h3><label class="chk"><input type="checkbox" id="expandAll" ${state.expandAll?"checked":""}> Zwischenprodukte ohne passenden Beruf trotzdem aufschlüsseln</label></div>
       <div class="tree"><ul>${treeHtml(P.root)}</ul></div></div>
@@ -701,6 +840,7 @@ function renderPlan(){
   `;
   document.getElementById("qty").addEventListener("change",e=>{ state.qty=Math.max(1,Math.min(999,parseInt(e.target.value)||1)); renderPlan(); });
   document.getElementById("expandAll").addEventListener("change",e=>{ state.expandAll=e.target.checked; renderPlan(); });
+  needPrices(treeIds(P.root));
 }
 
 function renderAll(){ renderSession(); renderChars(); renderList(); renderShop(); renderPlan(); }

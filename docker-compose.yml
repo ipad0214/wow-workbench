@@ -19,11 +19,15 @@ services:
     environment:
       - REQUIRED_GROUP=/gamers
       - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in .env}
+      # Battle.net API client for AH prices (develop.battle.net); empty = prices off
+      - BNET_CLIENT_ID=${BNET_CLIENT_ID:-}
+      - BNET_CLIENT_SECRET=${BNET_CLIENT_SECRET:-}
+      - BNET_RULESET=${BNET_RULESET:-1}
     volumes:
       - ./data:/data
     networks:
       - wow-internal
-      - wow-egress   # armory lookups (GET /api/armory); wow-api is the only member
+      - wow-egress   # armory lookups and AH prices (Blizzard); wow-api is the only member
 
   wow-web:
     build: .
