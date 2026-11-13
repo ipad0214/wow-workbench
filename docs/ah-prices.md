@@ -140,8 +140,11 @@ Branch `feat/ah-prices` from `main`, push, PR → `main`. Deploy only after the 
   (about 100k listings), 119/120/121 and 123/124/125 small (10–16k), 112/115/118 empty.
 - The armory names a character's realm type (`ruleset.rulesetId`); it's stored per character
   (`realm`) and is the default for the dropdown "Realm" in the header. The choice is saved per
-  account (`realm` in the state). Prices come from the house of the chosen realm type, and the
-  popup lists every realm type.
+  account (`realm` in the state). Prices come from the house of the chosen realm type.
+- Realm type and faction leave exactly one correct price, so there is no popup with other houses
+  any more (decided with the user). An account without a saved realm type takes the one of its
+  armory characters once and saves it; without armory data the default is Normal (not saved).
 - `REALM_HOUSES` in `site/index.html` assigns the groups. **Unverified:** Normal = 111 group,
   PvP = 110 group, Rollenspiel = 119 group, RP-PvP = 123 group. Check in-game: compare the lowest
-  price and count of one item with the popup, and swap the groups in that one constant if they differ.
+  price of one item with the page (switch the dropdown), and swap the groups in that one constant if
+  they differ.

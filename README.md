@@ -70,9 +70,11 @@ first name alone gives 404.
 ## AH prices (WoW Forever)
 
 The plan and the "Kaufen" section of the shopping list show auction house prices for the items no
-character can craft, drops and cloth (not vendor goods). Each row shows the **cheapest house of the
-row's character's faction** (race → Alliance/Horde; without a race the majority of the account's
-characters), hovering shows every Alliance and Horde house; Blackwater is ignored. The plan also
+character can craft, drops and cloth (not vendor goods). Forever has one auction house per **realm
+type and faction** (the capitals of a faction share one), so every row has exactly one price: the
+house of the account's realm type (dropdown "Realm" in the header, saved per account; taken once
+from the characters' armory data) and of the row's character's faction (race → Alliance/Horde;
+without a race the majority of the account's characters). Blackwater is ignored. The plan also
 compares buying with crafting ("AH 2g 10s · Material 1g 40s" per item; farmed materials count at AH
 price, vendor goods have no price and are named).
 

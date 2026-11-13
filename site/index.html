@@ -129,16 +129,7 @@ details>summary{cursor:pointer;color:var(--muted);font-size:.88rem}
 /* AH prices */
 .money{font-family:var(--f-mono);font-size:.82rem;font-variant-numeric:tabular-nums;white-space:nowrap}
 .mg{color:var(--m-g)}.ms{color:var(--m-s)}.mc{color:var(--m-c)}
-.price{font-size:.84rem;cursor:help;border-bottom:1px dotted var(--line)}
-#tip{position:fixed;z-index:50;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:6px 9px;
-  box-shadow:0 4px 14px rgb(0 0 0 / .18);font-size:.82rem;max-width:min(340px,calc(100vw - 16px));pointer-events:none}
-#tip table{border-collapse:collapse}
-#tip td{padding:1px 6px 1px 0;white-space:nowrap}
-#tip td.r{text-align:right}
-#tip tr.sel td{font-weight:600}
-#tip tr.other td{opacity:.6}
-#tip .tip-h{font-weight:600;margin-bottom:3px}
-.price .hint{font-size:.74rem}
+.price{font-size:.84rem}
 .total{font-size:.9rem;padding-top:4px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
 .cmp{font-size:.9rem;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
 /* session */
@@ -332,12 +323,14 @@ async function loadAccount(){
       }
     }
     store.status = "ok";
+    if(adoptRealm()) save();
   }catch(e){ store.status = e instanceof AuthError? "expired" : "failed"; }
   renderAll();
   if(store.status==="ok") syncStale();
 }
 function save(){
   if(store.status==="failed" || store.status==="expired" || store.status==="loading") return;
+  adoptRealm();
   store.dirty = true; store.status = "saving"; store.note = ""; renderSession();
   clearTimeout(store.timer); store.timer = setTimeout(flush, 500);
 }
@@ -602,7 +595,6 @@ const craftOrder = steps => [...steps].sort((a,b)=>b.depth-a.depth);
 
 // ---------- AH prices (wow-api caches Blizzard's Forever auction houses; off without a key) ----------
 const ALLIANCE=new Set(["Mensch","Zwerg","Nachtelf","Gnom"]), HORDE=new Set(["Orc","Untoter","Tauren","Troll"]);
-const FACTION_DE={A:"Allianz",H:"Horde"};
 const raceFaction = r => ALLIANCE.has(r)?"A":HORDE.has(r)?"H":null;
 // the row's character decides; otherwise the majority of the account's characters; null = both factions
 function factionFor(c){
@@ -616,19 +608,22 @@ function factionFor(c){
 const REALMS = {normal:"Normal", pvp:"PvP", rp:"Rollenspiel", rppvp:"RP-PvP"};
 const REALM_HOUSES = {normal:[111,114,117], pvp:[110,113,116], rp:[119,120,121], rppvp:[123,124,125]};
 const realmOfHouse = id => Object.keys(REALM_HOUSES).find(k=>REALM_HOUSES[k].includes(id))||null;
-let realmPref = null;   // chosen in the header; unset: the realm type of the characters
-function currentRealm(){
-  if(realmPref) return realmPref;
+// saved to the account: chosen in the header, or taken once from the characters' armory data
+let realmPref = null;
+function charsRealm(){
   const n={}; for(const c of chars) if(REALMS[c.realm]) n[c.realm]=(n[c.realm]||0)+1;
-  return Object.keys(n).sort((a,b)=>n[b]-n[a])[0] || "normal";
+  return Object.keys(n).sort((a,b)=>n[b]-n[a])[0] || null;
 }
+// true when the account had no realm type yet and the characters now give one
+function adoptRealm(){ if(realmPref) return false; realmPref=charsRealm(); return !!realmPref; }
+const currentRealm = () => realmPref || charsRealm() || "normal";
 function renderRealm(){
   const host=document.getElementById("realmPick"), cur=currentRealm();
   host.innerHTML=`Realm <select id="realm" aria-label="Realm-Typ für die AH-Preise">${Object.entries(REALMS).map(([k,v])=>`<option value="${k}"${k===cur?" selected":""}>${v}</option>`).join("")}</select>`;
 }
 document.addEventListener("change",ev=>{
   if(ev.target.id!=="realm") return;
-  realmPref=ev.target.value; save(); hideTip(); renderRealm(); renderShop(); renderPlan();
+  realmPref=ev.target.value; save(); renderRealm(); renderShop(); renderPlan();
 });
 const PRICE_TTL=60*1000;
 // status: idle | ok | off (no key or unreachable: no prices, no error, retry after 5 min)
@@ -659,7 +654,7 @@ async function flushPrices(){
 function renderPrices(){
   const a=document.activeElement;
   if(a?.tagName==="INPUT" && a.closest("#plan,#shop")){ a.addEventListener("blur",()=>setTimeout(renderPrices),{once:true}); return; }
-  hideTip(); renderShop(); renderPlan();
+  renderShop(); renderPlan();
 }
 const moneyTxt = c => {
   c=Math.round(c); const g=Math.floor(c/1e4), s=Math.floor(c/100)%100, k=c%100, p=[];
@@ -667,7 +662,6 @@ const moneyTxt = c => {
   return p.join(" ");
 };
 const money = c => `<span class="money">${moneyTxt(c).replace(/(\d+)([gsc])/g,'<span class="m$2">$1$2</span>')}</span>`;
-const houseName = h => `${FACTION_DE[h.faction]} · ${REALMS[realmOfHouse(h.id)]||"#"+h.id}`;   // all houses of a faction share one name
 // offer in the faction's house of the chosen realm type (cheaper of both factions when f is null);
 // null: not on offer; undefined: no data
 function priceOf(id,f){
@@ -679,39 +673,13 @@ function priceOf(id,f){
   }
   return best;
 }
-// popup on hover, focus or tap: every Alliance/Horde house; native title tooltips are slow and don't show on touch
-const tipAttr = (id,house) => `tabindex="0" data-tip="${id}"${house?` data-tiph="${house.id}"`:""}`;
-const tip=document.createElement("div"); tip.id="tip"; tip.setAttribute("role","tooltip"); tip.hidden=true; document.body.appendChild(tip);
-let tipFor=null;
-function showTip(el){
-  const id=+el.dataset.tip, sel=+el.dataset.tiph||0, p=ah.prices.get(id)||{};
-  const cur=currentRealm(), order=Object.keys(REALMS), rank=h=>{ const r=realmOfHouse(h.id); return r===cur? -1 : r? order.indexOf(r) : 99; };
-  const rows=[...ah.houses.values()].sort((a,b)=>rank(a)-rank(b)||a.faction.localeCompare(b.faction)).map(h=>{
-    const x=p[h.id];
-    return `<tr class="${h.id===sel?"sel":""}${realmOfHouse(h.id)!==cur?" other":""}"><td>${esc(houseName(h))}</td><td class="r">${x?money(x[0]):'<span class="hint">nicht im AH</span>'}</td><td class="r hint">${x?`${x[1]} Stk.`:""}</td></tr>`;
-  });
-  tip.innerHTML=`<div class="tip-h">${esc(I(id).name)} · pro Stück</div><table>${rows.join("")}</table>`;
-  tip.hidden=false;
-  const r=el.getBoundingClientRect(), w=tip.offsetWidth, h=tip.offsetHeight;
-  tip.style.left=Math.max(8,Math.min(r.left,innerWidth-w-8))+"px";
-  tip.style.top=(r.bottom+6+h>innerHeight-8? Math.max(8,r.top-h-6) : r.bottom+6)+"px";
-  tipFor?.removeAttribute("aria-describedby"); tipFor=el; el.setAttribute("aria-describedby","tip");
-}
-function hideTip(){ tip.hidden=true; tipFor?.removeAttribute("aria-describedby"); tipFor=null; }
-// hover only for a real mouse: after a tap, touch devices fire compatibility mouse events that would close the popup again
-document.addEventListener("pointerover",e=>{ if(e.pointerType!=="mouse") return; const el=e.target.closest?.("[data-tip]"); if(el){ if(el!==tipFor) showTip(el); } else if(tipFor) hideTip(); });
-document.addEventListener("focusin",e=>{ const el=e.target.closest?.("[data-tip]"); if(el) showTip(el); else if(tipFor) hideTip(); });
-// a tap fires mouseover, focusin and click at once, so a tap only opens; tapping elsewhere closes
-document.addEventListener("click",e=>{ const el=e.target.closest?.("[data-tip]"); if(el) showTip(el); else if(tipFor) hideTip(); });
-document.addEventListener("keydown",e=>{ if(e.key==="Escape" && tipFor) hideTip(); });
-addEventListener("scroll",()=>{ if(tipFor) hideTip(); },{capture:true,passive:true});
 const BUY_AH = g => g==="AH"||g==="X"||g==="C";   // vendor goods (V) have no AH price
-// "· à 16s 11c = 1g 93s 32c <house>" next to a buy row
+// "· à 16s 11c = 1g 93s 32c" next to a buy row
 function priceNote(id,qty,f){
   if(ah.status==="off") return "";
   const p=priceOf(id,f); if(p===undefined) return "";
-  if(!p) return ` <span class="price hint" ${tipAttr(id)}>· nicht im AH</span>`;
-  return ` <span class="price" ${tipAttr(id,p.house)}>· ${qty>1?`à ${money(p.unit)} = ${money(p.unit*qty)}`:money(p.unit)} <span class="hint">${esc(houseName(p.house))}</span></span>`;
+  if(!p) return ` <span class="price hint">· nicht im AH</span>`;
+  return ` <span class="price">· ${qty>1?`à ${money(p.unit)} = ${money(p.unit*qty)}`:money(p.unit)}</span>`;
 }
 // rows: [{id,qty,f}]
 function totalLine(rows,label){
@@ -725,7 +693,7 @@ function ahStatus(){
   if(ah.status==="off") return `<div class="hint">AH-Preise nicht verfügbar</div>`;
   const ts=[...ah.houses.values()].map(h=>Date.parse(h.updatedAt)).filter(Boolean);
   if(!ts.length) return "";
-  return `<div class="hint">AH-Preise: Stand ${ago(new Date(Math.min(...ts)).toISOString())} · Auktionshaus deiner Fraktion auf ${esc(REALMS[currentRealm()])}-Realms · Preis antippen oder darauf zeigen für alle Realm-Typen</div>`;
+  return `<div class="hint">AH-Preise: ${esc(REALMS[currentRealm()])}, Auktionshaus der Fraktion des Charakters · Stand ${ago(new Date(Math.min(...ts)).toISOString())}</div>`;
 }
 // material cost per crafted unit from the plan tree, per recipe index: raw materials at AH price
 // (also the farmed ones, as their value), intermediates with their own material cost
@@ -749,7 +717,7 @@ const matExtra = m => (m.vendor?" + Händlerware":"")+(m.unpriced?` + ${m.unpric
 function craftNote(m,id,f){
   if(ah.status==="off" || !m) return "";
   const p=priceOf(id,f); if(p===undefined) return "";
-  return ` <span class="price hint" ${tipAttr(id,p&&p.house)}>· AH ${p?money(p.unit):"–"} · Material ${money(m.per)}${esc(matExtra(m))}</span>`;
+  return ` <span class="price hint">· AH ${p?money(p.unit):"–"} · Material ${money(m.per)}${esc(matExtra(m))}</span>`;
 }
 function craftCompare(m,id,f){
   if(ah.status==="off" || !m) return "";
@@ -759,7 +727,7 @@ function craftCompare(m,id,f){
   if(p && p.unit>m.per && complete) verdict=`<span>→ herstellen spart <b>${money(p.unit-m.per)}</b></span>`;
   else if(p && p.unit<m.per) verdict=`<span>→ kaufen ist ${complete?"":"mindestens "}<b>${money(m.per-p.unit)}</b> günstiger</span>`;
   return `<div class="cmp"><span class="hint">Kaufen oder herstellen, pro Stück:</span>
-    <span class="price" ${tipAttr(id,p&&p.house)}>AH ${p?`<b>${money(p.unit)}</b> <span class="hint">${esc(houseName(p.house))}</span>`:"nicht im AH"}</span>
+    <span class="price">AH ${p?`<b>${money(p.unit)}</b>`:"nicht im AH"}</span>
     <span>Material <b>${money(m.per)}</b>${m.vendor||m.unpriced?`<span class="hint">${esc(matExtra(m))}</span>`:""}</span>${verdict}</div>`;
 }
 function treeIds(n,out=new Set()){ out.add(n.id); for(const k of n.kids||[]) treeIds(k,out); return out; }
