@@ -136,6 +136,7 @@ details>summary{cursor:pointer;color:var(--muted);font-size:.88rem}
 #tip td{padding:1px 6px 1px 0;white-space:nowrap}
 #tip td.r{text-align:right}
 #tip tr.sel td{font-weight:600}
+#tip tr.other td{opacity:.6}
 #tip .tip-h{font-weight:600;margin-bottom:3px}
 .price .hint{font-size:.74rem}
 .total{font-size:.9rem;padding-top:4px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
@@ -143,6 +144,10 @@ details>summary{cursor:pointer;color:var(--muted);font-size:.88rem}
 /* session */
 .hdr-r{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right}
 @media (max-width:600px){.hdr-r{align-items:flex-start;text-align:left}}
+.hdr-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 12px}
+@media (max-width:600px){.hdr-row{justify-content:flex-start}}
+.realm-pick{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:var(--muted)}
+.realm-pick select{padding:2px 6px;font-size:.85rem}
 .session{font-size:.85rem}
 .session button.ghost{padding:0 4px;font-size:.85rem}
 .warn-t{color:var(--warn);font-weight:600}
@@ -157,7 +162,7 @@ a{color:var(--accent)}
       <h1>Forever <span>Werkbank</span></h1>
       <div class="sub">Alle Classic-Berufsrezepte (Stufe 1–300). Wähle ein Item, und die Werkbank verteilt Farmen, Herstellen und Post auf deine Charaktere.</div>
     </div>
-    <div class="hdr-r"><div class="session" id="session"></div><div class="count" id="stats"></div></div>
+    <div class="hdr-r"><div class="hdr-row"><label class="realm-pick" id="realmPick"></label><div class="session" id="session"></div></div><div class="count" id="stats"></div></div>
   </header>
 
   <div class="grid">
@@ -252,7 +257,7 @@ async function armoryLookup(name, surname){
 }
 const orderProfs = ps => [...PRIMARY,...SECONDARY].filter(p=>ps.includes(p));
 // armory data wins over what was entered by hand; id stays
-const fromArmory = (c,a) => ({...c, name:a.name, surname:a.surname, race:a.race||c.race, cls:a.cls||c.cls, level:a.level,
+const fromArmory = (c,a) => ({...c, name:a.name, surname:a.surname, race:a.race||c.race, cls:a.cls||c.cls, level:a.level, ...(a.realm && {realm:a.realm}),
   profs:orderProfs(Object.keys(a.skills)), skills:a.skills, syncedAt:new Date().toISOString(), syncedFor:slugOf(a.name,a.surname)});
 // armory data in the editor only counts while name + surname are still the ones it was loaded for
 const armoryFits = e => !!e.skills && e.syncedFor===slugOf(e.name,e.surname||"");
@@ -309,7 +314,8 @@ function readLegacy(){
     return (Array.isArray(c)&&c.length) || (Array.isArray(l)&&l.length) ? {chars:Array.isArray(c)?c:[], list:Array.isArray(l)?l:[]} : null;
   }catch(e){ return null; }
 }
-function applyState(d){ chars = Array.isArray(d.chars)? d.chars : []; shop = normalizeShop(d.list); store.updatedAt = d.updatedAt||null; }
+function applyState(d){ chars = Array.isArray(d.chars)? d.chars : []; shop = normalizeShop(d.list); realmPref = REALMS[d.realm]? d.realm : null; store.updatedAt = d.updatedAt||null; }
+const payload = () => ({chars, list:shop, ...(realmPref && {realm:realmPref})});
 async function loadAccount(){
   try{
     const me = await api("GET","/api/me"); store.user = me?.name || ""; store.logoutUrl = me?.logoutUrl || "";
@@ -320,7 +326,7 @@ async function loadAccount(){
       const legacy = readLegacy();
       chars = legacy? legacy.chars : []; shop = normalizeShop(legacy? legacy.list : []);
       if(legacy){
-        const r = await api("PUT","/api/state",{chars, list:shop}); store.updatedAt = r.updatedAt;
+        const r = await api("PUT","/api/state",payload()); store.updatedAt = r.updatedAt;
         for(const k of LEGACY_KEYS) try{ localStorage.removeItem(k); }catch(e){}
         store.note = "Deine Charaktere und deine Liste aus diesem Browser wurden in dein Konto übernommen.";
       }
@@ -340,7 +346,7 @@ async function flush(){
   if(store.inflight){ store.again = true; return; }
   store.inflight = true; store.dirty = false;
   try{
-    const r = await api("PUT","/api/state",{chars, list:shop});
+    const r = await api("PUT","/api/state",payload());
     store.updatedAt = r.updatedAt; store.status = store.dirty? "saving" : "ok";
   }catch(e){ store.dirty = true; store.status = e instanceof AuthError? "expired" : "error"; }
   finally{ store.inflight = false; renderSession(); if(store.again){ store.again = false; flush(); } }
@@ -357,7 +363,7 @@ document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==
 addEventListener("pagehide",()=>{
   // best effort for edits made in the last 500 ms; never after a failed load or an expired session
   if(!store.dirty || !(store.status==="saving" || store.status==="error")) return;
-  try{ fetch("/api/state",{method:"PUT",keepalive:true,credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({chars,list:shop})}); }catch(e){}
+  try{ fetch("/api/state",{method:"PUT",keepalive:true,credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())}); }catch(e){}
 });
 function renderSession(){
   const host=document.getElementById("session"); if(!host) return;
@@ -384,7 +390,7 @@ function renderChars(){
   host.innerHTML = (store.note?`<div class="banner">${esc(store.note)}</div>`:"") + (chars.length? chars.map(c=>`
     <div class="char">
       <div class="char-top">
-        <div><span class="char-name">${esc(fullName(c))}</span> <span class="char-meta">${esc([c.level?`Stufe ${c.level}`:"",c.race,c.cls].filter(Boolean).join(" "))}</span></div>
+        <div><span class="char-name">${esc(fullName(c))}</span> <span class="char-meta">${esc([c.level?`Stufe ${c.level}`:"",c.race,c.cls].filter(Boolean).join(" "))}${REALMS[c.realm]?` · ${esc(REALMS[c.realm])}`:""}</span></div>
         <div><button class="ghost" data-edit="${c.id}">Bearbeiten</button><button class="ghost" data-del="${c.id}" aria-label="${esc(fullName(c))} entfernen">✕</button></div>
       </div>
       <div class="chips">${c.profs.map(p=>profChip(c,p)).join("")||'<span class="hint">keine Berufe</span>'}</div>
@@ -604,6 +610,26 @@ function factionFor(c){
   let a=0,h=0; for(const x of chars){ const g=raceFaction(x.race); if(g==="A") a++; else if(g==="H") h++; }
   return a>h?"A":h>a?"H":null;
 }
+// realm types ("rulesets"); every one has its own Alliance, Horde and Blackwater auction house.
+// The API names all of them alike and doesn't say which house belongs to which realm type: the
+// assignment below comes from an in-game check, see docs/ah-prices.md.
+const REALMS = {normal:"Normal", pvp:"PvP", rp:"Rollenspiel", rppvp:"RP-PvP"};
+const REALM_HOUSES = {normal:[111,114,117], pvp:[110,113,116], rp:[119,120,121], rppvp:[123,124,125]};
+const realmOfHouse = id => Object.keys(REALM_HOUSES).find(k=>REALM_HOUSES[k].includes(id))||null;
+let realmPref = null;   // chosen in the header; unset: the realm type of the characters
+function currentRealm(){
+  if(realmPref) return realmPref;
+  const n={}; for(const c of chars) if(REALMS[c.realm]) n[c.realm]=(n[c.realm]||0)+1;
+  return Object.keys(n).sort((a,b)=>n[b]-n[a])[0] || "normal";
+}
+function renderRealm(){
+  const host=document.getElementById("realmPick"), cur=currentRealm();
+  host.innerHTML=`Realm <select id="realm" aria-label="Realm-Typ für die AH-Preise">${Object.entries(REALMS).map(([k,v])=>`<option value="${k}"${k===cur?" selected":""}>${v}</option>`).join("")}</select>`;
+}
+document.addEventListener("change",ev=>{
+  if(ev.target.id!=="realm") return;
+  realmPref=ev.target.value; save(); hideTip(); renderRealm(); renderShop(); renderPlan();
+});
 const PRICE_TTL=60*1000;
 // status: idle | ok | off (no key or unreachable: no prices, no error, retry after 5 min)
 const ah={status:"idle", houses:new Map(), prices:new Map(), at:new Map(), pending:new Set(), queue:new Set(), timer:null, offUntil:0};
@@ -641,13 +667,14 @@ const moneyTxt = c => {
   return p.join(" ");
 };
 const money = c => `<span class="money">${moneyTxt(c).replace(/(\d+)([gsc])/g,'<span class="m$2">$1$2</span>')}</span>`;
-const houseName = h => `${FACTION_DE[h.faction]} #${h.id}`;   // all houses of a faction share one name
-// cheapest offer in the faction's houses (both factions when f is null); null: not on offer; undefined: no data
+const houseName = h => `${FACTION_DE[h.faction]} · ${REALMS[realmOfHouse(h.id)]||"#"+h.id}`;   // all houses of a faction share one name
+// offer in the faction's house of the chosen realm type (cheaper of both factions when f is null);
+// null: not on offer; undefined: no data
 function priceOf(id,f){
   const p=ah.prices.get(id); if(!p) return undefined;
   let best=null;
   for(const [hid,[unit,qty]] of Object.entries(p)){
-    const h=ah.houses.get(+hid); if(!h || (f && h.faction!==f)) continue;
+    const h=ah.houses.get(+hid); if(!h || (f && h.faction!==f) || realmOfHouse(h.id)!==currentRealm()) continue;
     if(!best || unit<best.unit) best={unit,qty,house:h};
   }
   return best;
@@ -658,9 +685,10 @@ const tip=document.createElement("div"); tip.id="tip"; tip.setAttribute("role","
 let tipFor=null;
 function showTip(el){
   const id=+el.dataset.tip, sel=+el.dataset.tiph||0, p=ah.prices.get(id)||{};
-  const rows=[...ah.houses.values()].sort((a,b)=>a.faction.localeCompare(b.faction)||a.id-b.id).map(h=>{
+  const cur=currentRealm(), order=Object.keys(REALMS), rank=h=>{ const r=realmOfHouse(h.id); return r===cur? -1 : r? order.indexOf(r) : 99; };
+  const rows=[...ah.houses.values()].sort((a,b)=>rank(a)-rank(b)||a.faction.localeCompare(b.faction)).map(h=>{
     const x=p[h.id];
-    return `<tr${h.id===sel?' class="sel"':""}><td>${esc(houseName(h))}</td><td class="r">${x?money(x[0]):'<span class="hint">nicht im AH</span>'}</td><td class="r hint">${x?`${x[1]} Stk.`:""}</td></tr>`;
+    return `<tr class="${h.id===sel?"sel":""}${realmOfHouse(h.id)!==cur?" other":""}"><td>${esc(houseName(h))}</td><td class="r">${x?money(x[0]):'<span class="hint">nicht im AH</span>'}</td><td class="r hint">${x?`${x[1]} Stk.`:""}</td></tr>`;
   });
   tip.innerHTML=`<div class="tip-h">${esc(I(id).name)} · pro Stück</div><table>${rows.join("")}</table>`;
   tip.hidden=false;
@@ -697,7 +725,7 @@ function ahStatus(){
   if(ah.status==="off") return `<div class="hint">AH-Preise nicht verfügbar</div>`;
   const ts=[...ah.houses.values()].map(h=>Date.parse(h.updatedAt)).filter(Boolean);
   if(!ts.length) return "";
-  return `<div class="hint">AH-Preise: Stand ${ago(new Date(Math.min(...ts)).toISOString())} · günstigstes Auktionshaus deiner Fraktion · Preis antippen oder darauf zeigen für alle Häuser</div>`;
+  return `<div class="hint">AH-Preise: Stand ${ago(new Date(Math.min(...ts)).toISOString())} · Auktionshaus deiner Fraktion auf ${esc(REALMS[currentRealm()])}-Realms · Preis antippen oder darauf zeigen für alle Realm-Typen</div>`;
 }
 // material cost per crafted unit from the plan tree, per recipe index: raw materials at AH price
 // (also the farmed ones, as their value), intermediates with their own material cost
@@ -869,7 +897,7 @@ function renderPlan(){
   needPrices(treeIds(P.root));
 }
 
-function renderAll(){ renderSession(); renderChars(); renderList(); renderShop(); renderPlan(); }
+function renderAll(){ renderRealm(); renderSession(); renderChars(); renderList(); renderShop(); renderPlan(); }
 document.getElementById("stats").textContent = `${recipes.length} Rezepte · ${Object.keys(PROF_DE).length} Herstellungsberufe`;
 // open with a realistic example: first Blacksmithing recipe that uses mined bars
 state.sel = recipes.find(r=>I(r.item).name==="Ornate Mithril Boots")?.i ?? recipes.find(r=>r.prof==="Schmiedekunst")?.i ?? null;

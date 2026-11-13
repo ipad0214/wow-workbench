@@ -13,6 +13,7 @@ test("reads class, race, level and skills from the embedded state", () => {
   assert.equal(c.level, 18);
   assert.equal(c.cls, "Paladin");
   assert.equal(c.race, "Mensch");
+  assert.equal(c.realm, "normal");
   assert.deepEqual(c.skills, {
     Bergbau: [96, 150], Schmiedekunst: [71, 150], Kochkunst: [50, 150], Angeln: [20, 75], "Erste Hilfe": [60, 150],
   });

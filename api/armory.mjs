@@ -13,6 +13,9 @@ export const PROFESSIONS = {
   185: "Kochkunst", 129: "Erste Hilfe", 356: "Angeln",
 };
 
+// realm type ("ruleset"); Forever has no realms, only these. Each one has its own auction houses.
+export const RULESETS = { 1: "pvp", 2: "normal", 3: "rp", 15: "rppvp" };
+
 const STATE_RE = /var characterProfileInitialState\s*=\s*(\{[\s\S]*?\});\s*<\/script>/;
 
 export const slugFor = (name, surname) => `${name}-${surname}`.toLocaleLowerCase("de");
@@ -40,6 +43,7 @@ export function parseArmory(html, onUnknown = () => {}) {
     level: Number.isInteger(c.level) ? c.level : 0,
     cls: CLASSES[c.class?.id] ?? "",
     race: RACES[c.race?.id] ?? "",
+    ...(RULESETS[c.ruleset?.rulesetId] && { realm: RULESETS[c.ruleset.rulesetId] }),
     skills,
   };
 }
