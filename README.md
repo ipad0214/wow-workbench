@@ -1,6 +1,6 @@
 # crafting-site — "Forever Werkbank"
 
-Crafting planner for WoW Classic professions, served on **jupiter** at <https://wow.kuckelsberg.de>
+Crafting planner for WoW Classic professions, served on **jupiter** at `https://$WOW_HOST`
 behind a Keycloak login. Every account has its own characters and shopping list, stored on the
 server.
 
@@ -24,14 +24,14 @@ Internet → nginx-proxy (TLS) → wow-auth (oauth2-proxy, group /gamers) ─┐
 
 ## Access: Keycloak groups
 
-Realm `kuckelsberg`, client `wow`. Only members of group **`/gamers`** get in (`OAUTH2_PROXY_ALLOWED_GROUPS`,
+Realm from `OIDC_ISSUER_URL`, client `wow`. Only members of group **`/gamers`** get in (`OAUTH2_PROXY_ALLOWED_GROUPS`,
 checked again in the API via `REQUIRED_GROUP`). The groups reach oauth2-proxy through the shared
 client scope `groups` (Group Membership mapper, claim `groups`, full path on).
 
-docs.kuckelsberg.de and spoolman.kuckelsberg.de only let in `/luna/portal-users`, so a friend who is
+The other sites behind Keycloak on jupiter (docs, Spoolman) only let in `/luna/portal-users`, so a friend who is
 only in `/gamers` sees nothing but the Werkbank.
 
-**Adding a friend:** Keycloak admin → realm `kuckelsberg` → Users → Add user (username, email) →
+**Adding a friend:** Keycloak admin → the realm → Users → Add user (username, email) →
 Credentials: temporary password → Groups: join `gamers`. Done; their characters start empty.
 
 ## Data
@@ -67,9 +67,10 @@ Data goes to `data-dev/` (git-ignored).
 ## One-time setup (done 2026-11-13)
 
 1. Keycloak client `wow`: client authentication on, standard flow, redirect URI
-   `https://wow.kuckelsberg.de/oauth2/callback`, web origin `https://wow.kuckelsberg.de`, valid post
-   logout redirect URI `https://wow.kuckelsberg.de/*`, audience mapper `wow`, default client scope `groups`.
-2. `.env` on jupiter: `WOW_CLIENT_SECRET` (Credentials tab), `WOW_COOKIE_SECRET`
+   `https://$WOW_HOST/oauth2/callback`, web origin `https://$WOW_HOST`, valid post
+   logout redirect URI `https://$WOW_HOST/*`, audience mapper `wow`, default client scope `groups`.
+2. `.env` on jupiter (template `.env.example`): `WOW_HOST`, `LETSENCRYPT_EMAIL`, `OIDC_ISSUER_URL`,
+   `AUTH_HOST`, `WOW_CLIENT_SECRET` (Credentials tab), `WOW_COOKIE_SECRET`
    (`openssl rand -base64 32 | head -c 32`).
-3. `/mnt/raid/services/nginx-proxy/vhost.d/wow.kuckelsberg.de` raises the proxy buffers (otherwise the
+3. `/mnt/raid/services/nginx-proxy/vhost.d/$WOW_HOST` raises the proxy buffers (otherwise the
    login callback returns 502). nginx-proxy picks up a new vhost.d file only after `docker restart wow-auth`.

@@ -9,6 +9,8 @@ import { DatabaseSync } from "node:sqlite";
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const REQUIRED_GROUP = process.env.REQUIRED_GROUP || ""; // defence in depth, e.g. "/gamers"
+// Keycloak end-session endpoint for the logout link; keeps host names out of the frontend
+const LOGOUT_URL = process.env.OIDC_ISSUER_URL ? `${process.env.OIDC_ISSUER_URL.replace(/\/$/, "")}/protocol/openid-connect/logout` : "";
 const MAX_BODY = 256 * 1024;
 const BACKUP_KEEP = 14;
 
@@ -92,7 +94,7 @@ const server = http.createServer(async (req, res) => {
   if (!who) return send(res, 401, { error: "not logged in" });
   if (who.forbidden) return send(res, 403, { error: "no access" });
   try {
-    if (url.pathname === "/api/me" && req.method === "GET") return send(res, 200, { name: who.name });
+    if (url.pathname === "/api/me" && req.method === "GET") return send(res, 200, { name: who.name, logoutUrl: LOGOUT_URL });
     if (url.pathname === "/api/state" && req.method === "GET") {
       const row = getState.get(who.id);
       return row ? send(res, 200, { ...JSON.parse(row.data), updatedAt: row.updated_at }) : send(res, 404, { error: "empty" });

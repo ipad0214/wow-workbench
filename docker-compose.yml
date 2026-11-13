@@ -16,6 +16,7 @@ services:
     restart: unless-stopped
     environment:
       - REQUIRED_GROUP=/gamers
+      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in .env}
     volumes:
       - ./data:/data
     networks:
