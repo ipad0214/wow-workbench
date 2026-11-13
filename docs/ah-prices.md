@@ -1,7 +1,7 @@
 # Auction house prices (branch `feat/ah-prices`)
 
-Plan approved on 2026-11-13 (buy-or-craft comparison included). Implemented; the spike (step 0)
-is still open until the Battle.net key exists.
+Plan approved on 2026-11-13 (buy-or-craft comparison included). Implemented, checked with real
+data and deployed to jupiter on 2026-11-13 (from the branch).
 
 ## Context
 The planner already lists the items no character can craft as "AH / Handwerker" in "Kaufen"
@@ -120,3 +120,12 @@ Branch `feat/ah-prices` from `main`, push, PR → `main`. Deploy only after the 
   cache), dev stack `/api/prices` → 503 `no-key` / 400 for bad ids, and a Playwright run with
   faked `/api/prices`: prices, hover, totals, comparison, Horde/Alliance choice, the off state,
   dark mode and 390 px width without horizontal scroll.
+
+## Spike results (2026-11-13, real key)
+- Houses (ruleset 1, locale de_DE): Alliance 110, 111, 119, 123 ("Auktionshaus der Allianz"),
+  Horde 113, 114, 120, 124 ("Auktionshaus der Horde"); Blackwater skipped. `factionOf()` matches.
+- Item ids match ours (Thoriumbarren 12359 ≈ 18–19s in 110/111/113), so `buyout` is the stack price
+  and dividing by `quantity` is right. `Last-Modified` is sent; re-checks are conditional GETs.
+- All houses of a faction have the same name, and prices differ a lot between them (Thorium about
+  19s in 110/111, 99s in 119/123 with little supply). Decided with the user: **keep the cheapest
+  house of the faction**, no fixed "own" house; the hover shows all of them.
