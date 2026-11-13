@@ -1,0 +1,6 @@
+.env
+.env.*
+docs/
+deploy.sh
+README.md
+.git
