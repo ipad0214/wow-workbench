@@ -11,15 +11,15 @@ Internet → nginx-proxy (TLS) → wow-auth (oauth2-proxy, group /gamers) ─┐
                          ▼
                       wow-web (nginx :80) ── /api/* ──► wow-api (Node 24 :3000) ── data/werkbank.db
                                                             │
-                                         network wow-egress └──► WoW Forever armory (HTTPS)
+                                         network wow-egress └──► WoW Forever armory, Battle.net API (HTTPS)
 ```
 
 | Path | Purpose |
 |---|---|
 | `site/index.html` | The app (data + UI in one file) |
 | `nginx/default.conf` | Static files, `/api/` → wow-api, gzip, security headers, `/healthz` |
-| `api/server.mjs` | Per-account storage: `GET /api/me`, `GET/PUT /api/state`; armory lookup `GET /api/armory`. `node:http` + `node:sqlite`, no npm dependencies |
-| `api/armory.mjs`, `api/test/` | Armory page parser and its tests (`node --test api/`) |
+| `api/server.mjs` | Per-account storage: `GET /api/me`, `GET/PUT /api/state`; armory lookup `GET /api/armory`; AH prices `GET /api/prices`. `node:http` + `node:sqlite`, no npm dependencies |
+| `api/armory.mjs`, `api/ah.mjs`, `api/test/` | Armory page parser, AH price cache, and their tests (`node --test "api/test/*.test.mjs"`, Node ≥ 22.5 for `node:sqlite`) |
 | `docker-compose.yml` | `wow-api`, `wow-web`, `wow-auth` |
 | `docker-compose.dev.yml`, `dev/` | Local development with a fake login (see below) |
 | `.env.example` | Secrets template; the real `.env` lives only on jupiter (chmod 600) |
@@ -67,12 +67,33 @@ first name alone gives 404.
   "jetzt herstellbar". Characters without armory data count as able to craft.
 - Base URL can be changed with `ARMORY_BASE` on wow-api (default: German page, EU region).
 
+## AH prices (WoW Forever)
+
+The plan and the "Kaufen" section of the shopping list show auction house prices for the items no
+character can craft, drops and cloth (not vendor goods). Each row shows the **cheapest house of the
+row's character's faction** (race → Alliance/Horde; without a race the majority of the account's
+characters), hovering shows every Alliance and Horde house; Blackwater is ignored. The plan also
+compares buying with crafting ("AH 2g 10s · Material 1g 40s" per item; farmed materials count at AH
+price, vendor goods have no price and are named).
+
+- Source: Blizzard's Game Data API, namespace `dynamic-forever-eu`, auction data per ruleset
+  (`/data/wow/ruleset/{ruleset}/auctions/{house}` + `/commodities`). **Not officially documented**;
+  details and open checks in `docs/ah-prices.md`.
+- Blizzard only serves whole snapshots of a house (no per-item lookup, refreshed about hourly).
+  `wow-api` keeps the cheapest price per item and house in `data/ah-cache.db` (a cache, not in the
+  backups) and re-checks a house at most every 5 minutes, when someone opens an item; unchanged
+  snapshots cost one `304`. Parallel requests share one refresh.
+- Key: a Battle.net API client (develop.battle.net → API Access → Create Client, any redirect URL,
+  e.g. `https://$WOW_HOST`). Put `BNET_CLIENT_ID` and `BNET_CLIENT_SECRET` into `.env` on jupiter; it
+  only reads public game data. Without a key, or when Blizzard is unreachable, `/api/prices` answers
+  503/502 and the page simply shows no prices ("AH-Preise nicht verfügbar").
+
 ## Security note
 
 wow-api trusts the `X-Forwarded-User` / `X-Forwarded-Groups` headers. oauth2-proxy strips
 client-supplied copies and injects its own, and only wow-auth can reach wow-web/wow-api (network
 `wow-internal` is internal and has no other members). **Never** put wow-web on another network.
-wow-api is also in `wow-egress`, a network of its own for the armory lookups; **no other container may
+wow-api is also in `wow-egress`, a network of its own for the armory lookups and AH prices; **no other container may
 join `wow-egress`**, otherwise it could reach wow-api directly and fake the user headers.
 
 ## Update the app
