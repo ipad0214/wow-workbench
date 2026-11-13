@@ -5,7 +5,7 @@
 import http from "node:http";
 import { mkdirSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { parseArmory, slugFor, ArmoryUnreadable, PROFESSIONS } from "./armory.mjs";
+import { parseArmory, slugFor, ArmoryUnreadable, PROFESSIONS, RULESETS } from "./armory.mjs";
 import { createAh, AhUnavailable } from "./ah.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -51,6 +51,8 @@ const arr = (v, max) => {
   return v;
 };
 const PROF_NAMES = new Set(Object.values(PROFESSIONS));
+const REALMS = new Set(Object.values(RULESETS));
+const realm = v => { if (!REALMS.has(v)) throw new Bad("invalid realm"); return v; };
 const skills = v => {
   if (!v || typeof v !== "object" || Array.isArray(v)) throw new Bad("invalid skills");
   const entries = Object.entries(v);
@@ -75,7 +77,10 @@ function validate(body) {
       ...(c?.level != null && { level: int(c.level, 0, 80) }),
       ...(c?.skills != null && { skills: skills(c.skills) }),
       ...(c?.syncedAt != null && { syncedAt: str(c.syncedAt, 30) }),
+      ...(c?.realm != null && { realm: realm(c.realm) }),
     })),
+    // realm type the AH prices come from; unset: taken from the characters
+    ...(body.realm != null && { realm: realm(body.realm) }),
     list: arr(body.list ?? [], 200).map(e => ({
       i: int(e?.i, 0, 1e6),
       item: int(e?.item, -1e7, 1e7),

@@ -129,3 +129,22 @@ Branch `feat/ah-prices` from `main`, push, PR → `main`. Deploy only after the 
 - All houses of a faction have the same name, and prices differ a lot between them (Thorium about
   19s in 110/111, 99s in 119/123 with little supply). Decided with the user: **keep the cheapest
   house of the faction**, no fixed "own" house; the hover shows all of them.
+
+## Realm types (2026-11-13)
+- Houses are **not** per city: in Forever the three capitals of a faction share one auction house.
+  There is one house per realm type ("ruleset") and faction. Rulesets: 1 PvP, 2 Normal,
+  3 Rollenspiel, 15 RP-PvP. Every ruleset path lists all 15 houses with the same data, and a
+  house's own `ruleset` field only repeats the request path, so the API doesn't say which house is
+  which realm type.
+- The houses form 5 groups (Alliance/Horde/Blackwater): 110/113/116 and 111/114/117 are large
+  (about 100k listings), 119/120/121 and 123/124/125 small (10–16k), 112/115/118 empty.
+- The armory names a character's realm type (`ruleset.rulesetId`); it's stored per character
+  (`realm`) and is the default for the dropdown "Realm" in the header. The choice is saved per
+  account (`realm` in the state). Prices come from the house of the chosen realm type.
+- Realm type and faction leave exactly one correct price, so there is no popup with other houses
+  any more (decided with the user). An account without a saved realm type takes the one of its
+  armory characters once and saves it; without armory data the default is Normal (not saved).
+- `REALM_HOUSES` in `site/index.html` assigns the groups. **Unverified:** Normal = 111 group,
+  PvP = 110 group, Rollenspiel = 119 group, RP-PvP = 123 group. Check in-game: compare the lowest
+  price of one item with the page (switch the dropdown), and swap the groups in that one constant if
+  they differ.
