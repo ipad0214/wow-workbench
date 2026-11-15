@@ -3533,9 +3533,11 @@ R[1230] = {-25084,2,300,1,1,{{20725,4},{14344,6},{11754,2}},20735,16207}
 R[1231] = {-25086,2,300,1,1,{{20725,3},{14344,8},{12809,8}},20736,16207}
 R[1232] = {-27837,2,290,1,1,{{14344,10},{16203,6},{16204,14},{7082,4}},22392,16207}
 
--- indexes, like site/index.html builds them: recipes by product, recipes by reagent, recipes by profession
+-- indexes, like site/index.html builds them: recipes by product, recipes by reagent, recipes by profession.
+-- D.index(n) also takes recipes the addon reads from the game later (Core.addRecipe).
 D.byProduct, D.usedIn, D.byProf = {}, {}, {}
-for n, r in ipairs(R) do
+function D.index(n)
+  local r = R[n]
   local t = D.byProduct[r[1]] or {}
   t[#t + 1] = n
   D.byProduct[r[1]] = t
@@ -3549,5 +3551,6 @@ for n, r in ipairs(R) do
   p[#p + 1] = n
   D.byProf[prof] = p
 end
+for n in ipairs(R) do D.index(n) end
 
 return D

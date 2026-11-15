@@ -22,6 +22,8 @@ local function mock(kind, name)
   function methods:SetChecked(v) self.checked = v end
   function methods:GetChecked() return self.checked end
   function methods:SetEnabled(v) self.enabled = v end
+  function methods:GetFrameLevel() return rawget(self, "level") or 1 end
+  function methods:SetFrameLevel(v) self.level = v end
   function methods:RegisterEvent(e) events[e] = events[e] or {}; table.insert(events[e], self) end
   function methods:GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
   function methods:CreateFontString() return mock("FontString") end
@@ -107,7 +109,14 @@ local trade = { line = 164, name = "Schmiedekunst", linked = false, recipes = {
 C_TradeSkillUI = {
   GetAllRecipeIDs = function() local t = {}; for id in pairs(trade.recipes) do t[#t + 1] = id end; return t end,
   GetRecipeInfo = function(id) return { learned = trade.recipes[id][1] } end,
-  GetRecipeSchematic = function(id) return { outputItemID = trade.recipes[id][2] } end,
+  -- recipes[id][3]: more of the schematic; output false: the client can't describe the recipe
+  GetRecipeSchematic = function(id)
+    local r = trade.recipes[id]
+    if not r or r[2] == false then return nil end
+    local s = r[3] or {}
+    s.outputItemID = r[2]
+    return s
+  end,
   GetBaseProfessionInfo = function() return { professionID = trade.line, professionName = trade.name } end,
   IsTradeSkillLinked = function() return trade.linked end,
 }
@@ -293,7 +302,14 @@ local function shownButton(t)
 end
 local selected, qtyBox = 2661, 3
 trade.line, trade.name = 164, "Schmiedekunst"
-trade.recipes = { [2661] = { true, 2851 }, [2660] = { true, 2862 }, [99999] = { true, 77777 } }
+-- 99999: a WoW Forever recipe (Leitstein): not in the database, 1 from 2 Rauer Stein + 1 Kupferbarren
+-- 88888: one the client can't describe either
+trade.recipes = { [2661] = { true, 2851 }, [2660] = { true, 2862 }, [88888] = { true, false },
+  [99999] = { true, 77777, { quantityMin = 1, reagentSlotSchematics = {
+    { reagentType = 1, quantityRequired = 2, reagents = { { itemID = 2835 } } },
+    { reagentType = 1, quantityRequired = 1, reagents = { { itemID = 2840 } } },
+    { reagentType = 0, quantityRequired = 1, reagents = { { itemID = 6948 } } },   -- optional: left out
+  } } } }
 local page = mock("Frame")
 page.SchematicForm = { GetRecipeInfo = function() return selected and { recipeID = selected } end }
 page.CreateMultipleInputBox = { GetValue = function() return qtyBox end }
@@ -313,11 +329,23 @@ check("no note for a recipe that isn't on the list", not texts():find("Auf der W
 addBtn.scripts.OnClick()
 check("another recipe becomes a new entry", #db.shop == 2 and db.shop[2].item == 2862 and db.shop[2].qty == 1)
 check("its craft is planned", ns.Core.list().crafts[2862] ~= nil)
-selected = 99999
+check("the note is drawn above the window's panels", rawget(addBtn, "level") and addBtn.level > 1)
+selected = 88888
 fire("TRADE_SKILL_SHOW")
-check("a recipe the database doesn't know is marked", texts():find("Nicht in der Werkbank-Datenbank", 1, true) and addBtn.enabled == false)
+check("a recipe nobody can describe is marked", texts():find("Nicht in der Werkbank-Datenbank", 1, true) and addBtn.enabled == false)
 addBtn.scripts.OnClick()
 check("and not added", #db.shop == 2 and prints[#prints]:find("kennt die Werkbank nicht", 1, true), prints[#prints])
+selected = 99999
+fire("TRADE_SKILL_SHOW")
+check("a recipe only the game knows is taken from it", db.extra[99999] and db.extra[99999].item == 77777 and addBtn.enabled == true)
+local ex = db.extra[99999]
+check("with its basic reagents only", #ex.reag == 2 and ex.reag[1][1] == 2835 and ex.reag[1][2] == 2 and ex.reag[2][1] == 2840)
+addBtn.scripts.OnClick()
+check("and added", #db.shop == 3 and db.shop[3].item == 77777)
+local k77 = ns.Core.list().crafts[77777]
+check("and planned: crafted by Ulfrik from its reagents", k77 and k77.c == 0 and k77.reag[1][1] == 2835)
+check("its reagents are planned too", ns.Core.list().crafts[2840] and ns.Core.list().raws[2835])
+table.remove(db.shop, 3); ns.Core.update(true)
 selected = 2661
 main:Hide()
 buttonWithText("Werkbank").scripts.OnClick()
@@ -374,6 +402,11 @@ end
 WerkbankDB = { list = body .. ";" .. ns.Codec.checksum(body), chars = {} }
 fire("PLAYER_LOGIN")
 check("an old WB1 list becomes the shopping list", WerkbankDB.list == nil and WerkbankDB.shop[1] and WerkbankDB.shop[1].item == 2851)
+-- next login: the recipe read from the game is there again, an entry with a stale index finds it
+WerkbankDB = { chars = {}, extra = { [99999] = ex }, shop = { { item = 77777, r = 1, qty = 2 } } }
+fire("PLAYER_LOGIN")
+local r = WerkbankDB.shop[1] and WerkbankDB.shop[1].r
+check("saved game recipes come back on login", r and ns2.Data.recipes[r][1] == 77777 and ns2.Data.byProf["Schmiedekunst"][#ns2.Data.byProf["Schmiedekunst"]] == r)
 
 print_ = io.write(string.format("%d passed, %d failed\n", passed, failed))
 os.exit(failed == 0 and 0 or 1)

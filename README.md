@@ -121,7 +121,9 @@ reach the network; the data moves as text (details and format: `docs/addon-sync.
 - **Planning in game:** the game's profession window gets the buttons "Auf die Werkbank" (puts the
   selected recipe on the list, as often as the window's quantity box says) and "Werkbank" (opens the
   list). The addon plans the list itself with the same rules as the page (`Plan.lua`), using the
-  characters' profiles; a character that has learned a recipe crafts it before one that hasn't. The list
+  characters' profiles; a character that has learned a recipe crafts it before one that hasn't.
+  Recipes WoW Forever added (not in `site/data.js`) are read from the game when selected in the window
+  (product, yield, basic reagents) and kept in `WerkbankDB.extra`; only the addon plans with them. The list
   window shows the entries with `-`/`+`/`x` and "Liste leeren". `/werkbank import` still takes a list
   from the page and replaces the in-game list. Plan and steps: `docs/addon-standalone.md`.
 - Friends download the addon with "Addon herunterladen" in the page header (`/addon/Werkbank.zip`) and unpack it into

@@ -6,6 +6,8 @@
 --             to craft it. Filled in the profession window (Craft.lua) or by /werkbank import.
 --   shopAt  = when the list last changed
 --   list    = the WB1 string of addon 1.0; turned into shop once
+--   extra   = { [recipeID] = { item, prof, yMin, yMax, reag } }   recipes the database doesn't have (added by
+--             WoW Forever), read from the game in the profession window; added to Data on every login
 --   chars   = { ["Realm-Name"] = { name, realm, at, bags, bank, mail, transit = { { at, items } } } }
 --             bank/mail: nil until the character opened them once with the addon
 --   account = { at, items }   account bank, if the client has one
@@ -145,6 +147,31 @@ function Core.clearShop()
   db.shop = {}
   shopChanged()
 end
+-- ---------- recipes read from the game ----------
+local function register(e)
+  local p
+  for i, name in ipairs(Data.profsDe) do if name == e.prof then p = i - 1 end end
+  if not p then
+    Data.profs[#Data.profs + 1], Data.profsDe[#Data.profsDe + 1] = e.prof, e.prof
+    p = #Data.profsDe - 1
+  end
+  local n = #Data.recipes + 1
+  Data.recipes[n] = { e.item, p, 0, e.yMin, e.yMax, e.reag, 0, 0 }
+  Data.index(n)
+  return n
+end
+-- a recipe from Profile.recipeFromGame: saved for every login, and its index in Data.recipes
+function Core.addRecipe(recipeID, e)
+  db.extra[recipeID] = e
+  return register(e)
+end
+local function registerSaved()
+  local ids = {}
+  for id in pairs(db.extra) do ids[#ids + 1] = id end
+  table.sort(ids)   -- same order, same indexes on every login
+  for _, id in ipairs(ids) do register(db.extra[id]) end
+end
+
 -- entries whose recipe index no longer matches its product (the database changed) get the recipe the
 -- planner picks for it
 local function normalizeShop()
@@ -265,7 +292,8 @@ on("PLAYER_LOGIN", function()
   local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or string.gsub(GetRealmName(), "[%s%-]", "")
   myKey = realm .. "-" .. name
   db.chars[myKey] = db.chars[myKey] or { name = name, realm = realm, at = 0, bags = {}, transit = {} }
-  db.shop = db.shop or {}
+  db.shop, db.extra = db.shop or {}, db.extra or {}
+  registerSaved()
   normalizeShop()
   ns.UI.init()
   scanBags()

@@ -31,13 +31,21 @@ local KINDS = {
       local form = page.SchematicForm
       local info = form and form.GetRecipeInfo and form:GetRecipeInfo()
       if type(info) ~= "table" or not info.recipeID then return nil end
+      local prof = Profile.openProfession()
+      local n = findRecipe(prof, Profile.keysOf(info.recipeID))
+      if n == false then
+        -- not in the database (a WoW Forever recipe): take it as the game describes it
+        local e = Profile.recipeFromGame(info.recipeID, prof)
+        if e then n = Core.addRecipe(info.recipeID, e) end
+      end
       local box = page.CreateMultipleInputBox
-      return findRecipe(Profile.openProfession(), Profile.keysOf(info.recipeID)), box and box.GetValue and box:GetValue()
+      return n, box and box.GetValue and box:GetValue()
     end,
     -- left of the game's create buttons: [Werkbank] [Auf die Werkbank] [Alle herstellen] [n] [Herstellen]
-    place = function(page, add, open)
+    place = function(page, add, open, note)
       if page.CreateAllButton then add:SetPoint("RIGHT", page.CreateAllButton, "LEFT", -8, 0) else add:SetPoint("BOTTOMLEFT", 12, 12) end
       open:SetPoint("RIGHT", add, "LEFT", -4, 0)
+      note:SetPoint("BOTTOMLEFT", open, "TOPLEFT", 2, 5)
     end,
   },
   {
@@ -49,9 +57,10 @@ local KINDS = {
       return findRecipe(prof, Profile.idFromLink(GetTradeSkillItemLink(i))), TradeSkillInputBox and TradeSkillInputBox:GetNumber()
     end,
     -- above the create buttons, the row itself is full
-    place = function(_, add, open)
+    place = function(_, add, open, note)
       add:SetPoint("BOTTOMLEFT", TradeSkillCreateAllButton, "TOPLEFT", 0, 4)
       open:SetPoint("LEFT", add, "RIGHT", 4, 0)
+      note:SetPoint("BOTTOMLEFT", add, "TOPLEFT", 2, 5)
     end,
   },
   {
@@ -62,9 +71,10 @@ local KINDS = {
       local prof = Profile.profName(nil, (GetCraftDisplaySkillLine()))
       return findRecipe(prof, Profile.idFromLink(GetCraftItemLink(i))), 1   -- enchants are cast one by one
     end,
-    place = function(_, add, open)
+    place = function(_, add, open, note)
       add:SetPoint("BOTTOMRIGHT", CraftCreateButton, "TOPRIGHT", 0, 4)
       open:SetPoint("RIGHT", add, "LEFT", -4, 0)
+      note:SetPoint("BOTTOMRIGHT", add, "TOPRIGHT", -2, 5)
     end,
   },
 }
@@ -102,14 +112,16 @@ local function attach()
     local f = not k.add and k.frame()
     if f then
       k.add = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-      k.add:SetSize(130, 22); k.add:SetText("Auf die Werkbank")
+      k.add:SetSize(150, 22); k.add:SetText("Auf die Werkbank")
       k.add:SetScript("OnClick", function() add(k) end)
       local open = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
       open:SetSize(90, 22); open:SetText("Werkbank")
       open:SetScript("OnClick", UI.toggle)
-      k.place(f, k.add, open)
-      k.note = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      k.note:SetPoint("BOTTOM", k.add, "TOP", 0, 3)
+      -- above the window's own panels, or they cover the note
+      local level = f:GetFrameLevel() + 20
+      k.add:SetFrameLevel(level); open:SetFrameLevel(level)
+      k.note = k.add:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      k.place(f, k.add, open, k.note)
       f:HookScript("OnShow", refreshSoon)
     end
   end

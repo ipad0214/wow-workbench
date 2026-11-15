@@ -82,6 +82,24 @@ function Profile.keysOf(recipeID)
   return -recipeID, outputOf(C_TradeSkillUI, recipeID) or nil
 end
 
+-- a recipe the database doesn't have (WoW Forever added it), as the game describes it:
+-- { item, prof, yMin, yMax, reag = { { id, amount } } } with the required basic reagents; nil when the
+-- client can't describe it
+function Profile.recipeFromGame(recipeID, prof)
+  local s = call(C_TradeSkillUI, "GetRecipeSchematic", recipeID, false)
+  if type(s) ~= "table" or not prof then return nil end
+  local basic = Enum and Enum.CraftingReagentType and Enum.CraftingReagentType.Basic or 1
+  local reag = {}
+  for _, slot in ipairs(s.reagentSlotSchematics or {}) do
+    local r = slot.reagents and slot.reagents[1]
+    if r and r.itemID and (slot.reagentType == nil or slot.reagentType == basic) and (slot.quantityRequired or 0) > 0 then
+      reag[#reag + 1] = { r.itemID, slot.quantityRequired }
+    end
+  end
+  local out, yMin = s.outputItemID, math.max(1, s.quantityMin or 1)
+  return { item = (out and out > 0) and out or -recipeID, prof = prof, yMin = yMin, yMax = math.max(yMin, s.quantityMax or yMin), reag = reag }
+end
+
 -- the profession shown in the modern window (C_TradeSkillUI), or nil and why not: a linked
 -- profession, a guild's or an NPC's isn't this character's
 function Profile.openProfession()

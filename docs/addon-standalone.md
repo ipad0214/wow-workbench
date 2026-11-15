@@ -42,6 +42,11 @@ that window can't show: recipes of professions the current character doesn't hav
   `Plan.lua` against them. Only the characters with a profile take part in the plan.
 - The window gets the list entries on top: name, quantity, `-`/`+`, remove.
 - `/werkbank import` stays for now: an imported list replaces the in-game list.
+- Recipes WoW Forever added are not in the database (e.g. Bergbau's "Leitstein"). When one is selected
+  in the window, the addon reads it from the game (`C_TradeSkillUI.GetRecipeSchematic`: product,
+  yield, required basic reagents), keeps it in `WerkbankDB.extra` and adds it to `Data` on every login.
+  Their gather groups are unknown, so their own reagents count as "Drop / AH" unless the database
+  knows them.
 
 ### 2.3 Not in step 2
 The own search for other characters' professions (step 3), AH prices (step 4).

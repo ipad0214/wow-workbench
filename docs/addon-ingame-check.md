@@ -49,6 +49,9 @@ installing, and again after a big client patch.
 - [ ] "Werkbank" opens the list window: section "Liste" with both entries, `-`/`+`/`x` change them, and
       Farmen / Kaufen / Herstellen are planned with your characters (crafter = the one with the skill).
 - [ ] Enchanting (if a character has it): an enchant can be added too.
+- [ ] A WoW Forever recipe (e.g. Bergbau → "Leitstein"): the button is active, adding it works, the list
+      plans its reagents (Rauer Stein, Kupferbarren).
+- [ ] The note above "Werkbank" ("Auf der Werkbank: 3×") is readable, not covered by the window.
 - [ ] "Liste leeren" asks first, then empties the list.
 - [ ] `/werkbank import` with a list from the page → it replaces the in-game list.
 

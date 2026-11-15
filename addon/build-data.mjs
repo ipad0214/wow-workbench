@@ -62,9 +62,11 @@ export function toLua(D) {
   D.recipes.forEach((r, n) => out.push(`R[${n + 1}] = ${val([...r.slice(0, 7), r[7] || 0])}`));
   out.push(
     "",
-    "-- indexes, like site/index.html builds them: recipes by product, recipes by reagent, recipes by profession",
+    "-- indexes, like site/index.html builds them: recipes by product, recipes by reagent, recipes by profession.",
+    "-- D.index(n) also takes recipes the addon reads from the game later (Core.addRecipe).",
     "D.byProduct, D.usedIn, D.byProf = {}, {}, {}",
-    "for n, r in ipairs(R) do",
+    "function D.index(n)",
+    "  local r = R[n]",
     "  local t = D.byProduct[r[1]] or {}",
     "  t[#t + 1] = n",
     "  D.byProduct[r[1]] = t",
@@ -78,6 +80,7 @@ export function toLua(D) {
     "  p[#p + 1] = n",
     "  D.byProf[prof] = p",
     "end",
+    "for n in ipairs(R) do D.index(n) end",
     "",
     "return D",
     "",
