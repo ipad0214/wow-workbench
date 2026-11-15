@@ -16,13 +16,14 @@ Internet → nginx-proxy (TLS) → wow-auth (oauth2-proxy, group /gamers) ─┐
 
 | Path | Purpose |
 |---|---|
-| `site/index.html` | The app (data + UI in one file) |
+| `site/index.html` | The app (UI and planner) |
+| `site/data.js` | Recipe and item data (`DATA`); also the source of the addon's `Data.lua` |
 | `site/sync.js` | List export (`WB1`), stock import (`WC1`) and the netting of owned items; shared logic with the addon |
 | `nginx/default.conf` | Static files, `/api/` → wow-api, gzip, security headers, `/healthz` |
 | `api/server.mjs` | Per-account storage: `GET /api/me`, `GET/PUT /api/state`; armory lookup `GET /api/armory`; AH prices `GET /api/prices`. `node:http` + `node:sqlite`, no npm dependencies |
 | `api/armory.mjs`, `api/ah.mjs`, `api/validate.mjs`, `api/test/` | Armory page parser, AH price cache, state validation, and their tests (`node --test "api/test/*.test.mjs"`, Node ≥ 22.5 for `node:sqlite`) |
-| `addon/Werkbank/`, `addon/build.sh` | The in-game addon; `build.sh` packs it into `site/addon/Werkbank.zip` (the download on the page, not in git) |
-| `test/sync/`, `test/addon/` | Shared fixtures for `site/sync.js` and the addon (`node --test test/sync/`, `lua test/sync/run.lua`), addon smoke test (`lua test/addon/smoke.lua`) |
+| `addon/Werkbank/`, `addon/build.sh`, `addon/build-data.mjs` | The in-game addon; `build-data.mjs` writes `Werkbank/Data.lua` from `site/data.js` (committed), `build.sh` runs it and packs the addon into `site/addon/Werkbank.zip` (the download on the page, not in git) |
+| `test/sync/`, `test/addon/` | Shared fixtures for `site/sync.js` and the addon (`node --test test/sync/`, `lua test/sync/run.lua`), addon smoke test (`lua test/addon/smoke.lua`), recipe database (`node --test test/addon/`, `lua test/addon/data.lua`) |
 | `docker-compose.yml` | `wow-api`, `wow-web`, `wow-auth` |
 | `docker-compose.dev.yml`, `dev/` | Local development with a fake login (see below) |
 | `.env.example` | Secrets template; the real `.env` lives only on jupiter (chmod 600) |
@@ -113,6 +114,11 @@ reach the network; the data moves as text (details and format: `docs/addon-sync.
 - WoW Forever runs on the modern retail client (Midnight API). The interface number in
   `Werkbank.toc` comes from one guide; check it in game with `/dump (select(4, GetBuildInfo()))`.
   Checklist for a new client version: `docs/addon-ingame-check.md`.
+- **Characters:** every character that logs in with the addon saves its level, class, race, faction,
+  professions with skill points, and, once its profession window was opened, the recipes it has
+  learned. All characters of the WoW account see each other's profiles (section "Charaktere" in
+  `/werkbank`); `/werkbank debug` prints what the client returns for professions. First step towards
+  an addon that plans without the website: `docs/addon-standalone.md`.
 - Friends download the addon with "Addon herunterladen" in the page header (`/addon/Werkbank.zip`) and unpack it into
   `Interface/AddOns` of their Forever client.
 

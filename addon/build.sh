@@ -3,6 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p ../site/addon
+# the recipe database from site/data.js (also committed; test/addon/data.test.mjs checks it is current)
+node build-data.mjs
 rm -f ../site/addon/Werkbank.zip
 # -X: no extra file attributes, so the zip only changes when the addon does
 zip -qrX ../site/addon/Werkbank.zip Werkbank -x '*.DS_Store'

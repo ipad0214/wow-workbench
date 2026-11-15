@@ -29,6 +29,16 @@ installing, and again after a big client patch.
 - [ ] Log out, then on the page "Datei wählen …" → `WTF/Account/<ACCOUNT>/SavedVariables/Werkbank.lua`
       → same counts. In Chrome/Edge, "Aus WoW laden" appears afterwards.
 
+## Characters and professions
+- [ ] `/werkbank debug` on a character with two professions → both listed with the right skill points
+      and a German name after the arrow (not "nicht zugeordnet"). Note which call worked: ________
+- [ ] `/werkbank` → section "Charaktere": the character with class, level and its professions.
+- [ ] Open a profession window, close it, `/werkbank debug` → "Rezepte über …" with the number of learned
+      recipes, most of them "in der Datenbank". The window shows `x/y Rezepte` for that profession.
+- [ ] Enchanting: open its window too → the enchants count (they are stored by spell id).
+- [ ] Log in a second character → the first one is still listed with its professions and recipes.
+- [ ] Gain a skill point or learn a recipe → the section updates without `/reload`.
+
 ## If something fails
 `/console scriptErrors 1` shows Lua errors in game. Note the message and the line; the file names
 (`Scan.lua:42`) point straight into `addon/Werkbank/`.

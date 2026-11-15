@@ -116,7 +116,7 @@ function Core.update(quiet)
       for id, e in pairs(by) do
         local b = before[id]
         if b and e.need > 0 and e.have >= e.need and b.have < b.need then
-          print(string.format("|cffe08a3cWerkbank:|r %s vollständig (%d/%d)", ns.UI.itemName(id), e.have, e.need))
+          ns.UI.say(string.format("%s vollständig (%d/%d)", ns.UI.itemName(id), e.have, e.need))
         end
       end
     end
@@ -175,11 +175,18 @@ local function mailSent()
   target.transit[#target.transit + 1] = { at = time(), items = p.items }
 end
 
-local frame = CreateFrame("Frame")
-local function on(event, fn)
-  -- events that this client doesn't know are skipped instead of breaking the addon
-  if pcall(frame.RegisterEvent, frame, event) then frame[event] = fn end
+-- One event frame for the whole addon. An event can have several handlers; they run in the order they
+-- were added, so Core's (loaded first, sets up WerkbankDB on login) run before Profile's.
+local frame, handlers = CreateFrame("Frame"), {}
+function Core.on(event, fn)
+  if not handlers[event] then
+    -- events that this client doesn't know are skipped instead of breaking the addon
+    if not pcall(frame.RegisterEvent, frame, event) then return end
+    handlers[event] = {}
+  end
+  table.insert(handlers[event], fn)
 end
+local on = Core.on
 
 on("PLAYER_LOGIN", function()
   WerkbankDB = WerkbankDB or {}
@@ -212,7 +219,7 @@ on("BANKFRAME_CLOSED", bank(false))
 on("PLAYERBANKSLOTS_CHANGED", function() if db and bankOpen then scanBags(); Core.update() end end)
 -- newer clients open bank and mailbox through the interaction manager
 local function interaction(open)
-  return function(_, kind)
+  return function(kind)
     local T = Enum and Enum.PlayerInteractionType
     if not T then return end
     if kind == T.Banker or kind == T.CharacterBanker or kind == T.AccountBanker then bank(open)() end
@@ -229,6 +236,8 @@ on("MAIL_FAILED", function() pendingMail = nil end)
 on("GET_ITEM_INFO_RECEIVED", function() ns.UI.namesArrived() end)
 -- also fires on /reload, right before the SavedVariables are written
 on("PLAYER_LOGOUT", function() if db then Core.writeExport() end end)
-frame:SetScript("OnEvent", function(self, event, ...) self[event](self, ...) end)
+frame:SetScript("OnEvent", function(_, event, ...)
+  for _, fn in ipairs(handlers[event]) do fn(...) end
+end)
 
 return Core
