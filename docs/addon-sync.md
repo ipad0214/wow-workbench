@@ -59,6 +59,8 @@ stay readable. So the addon uses the modern API (`C_Container`, `C_Item`, `Enum.
 | `Codec.lua` | `WB1` decode, `WC1` encode, checksum. No WoW API, so it can be tested outside the game |
 | `Net.lua` | the netting algorithm. No WoW API, tested outside the game |
 | `Scan.lua` | bags, bank (while open) and mailbox (while open), mail in transit between own characters |
+| `Data.lua` | the recipe database, generated from `site/data.js` by `addon/build-data.mjs` (see `docs/addon-standalone.md`) |
+| `Profile.lua` | each character's level, class, race, professions with skill points and learned recipes; `/werkbank debug` |
 | `UI.lua` | list window, import/export windows, tooltip line |
 
 - **SavedVariables** `WerkbankDB` (account-wide): `list` (the decoded export), `chars["Realm-Name"] =

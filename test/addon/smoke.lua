@@ -87,6 +87,30 @@ function GetSendMailItem(a) local s = sendItems[a]; if s then return "x", s[1], 
 function SendMail() end
 ATTACHMENTS_MAX_RECEIVE, ATTACHMENTS_MAX_SEND = 16, 12
 
+-- the character and its professions (the modern calls; the classic ones are tried further down)
+local profsNow = { { "Bergbau", 186, 300, 300 }, { "Schmiedekunst", 164, 285, 300 } }
+function UnitClass() return "Paladin", "PALADIN", 2 end
+function UnitRace() return "Zwerg", "Dwarf", 3 end
+function UnitFactionGroup() return "Alliance" end
+function UnitLevel() return 60 end
+function GetBuildInfo() return "1.16.0", "64000", "Nov 1 2026", 16001 end
+-- like the client: prof1, prof2, archaeology, fishing, cooking, first aid, with gaps
+function GetProfessions() return profsNow[1] and 1, profsNow[2] and 2, nil, nil, profsNow[3] and 3 end
+function GetProfessionInfo(i) local p = profsNow[i]; return p[1], 0, p[3], p[4], 0, 0, p[2] end
+-- the open profession window: recipe id -> { learned, output item }
+local trade = { line = 164, name = "Schmiedekunst", linked = false, recipes = {
+  [2661] = { true, 2851 },     -- Kupferkettengürtel
+  [2660] = { true, 2862 },     -- Rauer Wetzstein
+  [9999] = { false, 1234 },    -- not learned yet
+} }
+C_TradeSkillUI = {
+  GetAllRecipeIDs = function() local t = {}; for id in pairs(trade.recipes) do t[#t + 1] = id end; return t end,
+  GetRecipeInfo = function(id) return { learned = trade.recipes[id][1] } end,
+  GetRecipeSchematic = function(id) return { outputItemID = trade.recipes[id][2] } end,
+  GetBaseProfessionInfo = function() return { professionID = trade.line, professionName = trade.name } end,
+  IsTradeSkillLinked = function() return trade.linked end,
+}
+
 -- ---------- load the addon like the client (TOC order, shared namespace) ----------
 local ns = {}
 for line in io.lines(root .. "addon/Werkbank/Werkbank.toc") do
@@ -108,6 +132,11 @@ local db = WerkbankDB
 check("own character created", db.chars["Everlook-Ulfrik"] ~= nil)
 check("bags scanned at login", db.chars["Everlook-Ulfrik"].bags[2770] == 3)
 check("no export work on every login", db.export == nil)
+local prof = db.chars["Everlook-Ulfrik"].profile
+check("profile read at login", prof and prof.class == "Paladin" and prof.race == "Zwerg" and prof.faction == "Alliance" and prof.level == 60)
+check("professions mapped by skill line", prof.profs["Bergbau"][1] == 300 and prof.profs["Schmiedekunst"][1] == 285
+  and prof.profs["Schmiedekunst"][2] == 300)
+check("recipe database loaded", #ns.Data.recipes == 1232 and ns.Data.items[2851] ~= nil)
 
 -- ---------- import a list: Ulfrik mines + smelts + crafts 2 belts (6 bars each) ----------
 SlashCmdList.WERKBANK("import")
@@ -128,12 +157,19 @@ check("list window opens after import", main and main.shown)
 -- 12 bars needed, Ränka has 2 -> 10 bars to smelt, 10 ore, Ulfrik has 3
 local e = ns.Core.byId[2770]
 check("ore netted: 3 of 10", e and e.need == 10 and e.have == 3, e and (e.have .. "/" .. e.need))
-local rowsText = {}
-for _, f in ipairs(frames) do if f.kind == "FontString" and f.text then rowsText[#rowsText + 1] = f.text end end
-local all = table.concat(rowsText, "\n")
+-- everything the window shows right now
+local function texts()
+  local t = {}
+  for _, f in ipairs(frames) do if f.kind == "FontString" and f.text then t[#t + 1] = f.text end end
+  return table.concat(t, "\n")
+end
+local all = texts()
 check("window shows the farm section", all:find("Farmen", 1, true))
 check("window shows ore 3/10", all:find("3/10", 1, true), all)
 check("window shows craft rows with what's left", all:find("noch 10×", 1, true), all)
+check("window lists the characters", all:find("Charaktere", 1, true) and all:find("Stufe 60", 1, true), all)
+check("window shows skill points", all:find("Schmiedekunst", 1, true) and all:find("285/300", 1, true), all)
+check("window asks to open the profession window", all:find("Fenster öffnen", 1, true), all)
 
 -- ---------- looting: 7 more ore -> ore row done, chat message ----------
 containers[0][1] = { 2770, 10 }
@@ -183,6 +219,71 @@ fire("MAIL_SHOW")
 fire("MAIL_INBOX_UPDATE")
 check("inbox read while open", db.chars["Everlook-Ulfrik"].mail and db.chars["Everlook-Ulfrik"].mail[2840] == 1)
 fire("MAIL_CLOSED")
+
+-- ---------- profiles: learned recipes, skill changes, the classic calls ----------
+fire("TRADE_SKILL_SHOW")
+local bs = prof.recipes["Schmiedekunst"]
+check("learned recipes saved by product", bs and bs.known[2851] and bs.known[2862])
+check("recipes not learned yet are left out", not bs.known[1234])
+check("window counts the database's recipes", texts():find("2/240 Rezepte", 1, true), texts())
+trade.linked, trade.recipes[9999][1] = true, true
+fire("TRADE_SKILL_LIST_UPDATE")
+check("a linked profession is not saved as own", not prof.recipes["Schmiedekunst"].known[1234])
+trade.linked = false
+trade.recipes[2661][1] = false   -- a window that is still filling in, or filtered
+fire("TRADE_SKILL_LIST_UPDATE")
+check("a partial read adds and keeps the rest", bs.known[1234] and bs.known[2851])
+for _, r in pairs(trade.recipes) do r[1] = false end
+fire("TRADE_SKILL_LIST_UPDATE")
+check("an empty read keeps the recipes", bs.known[2851] and bs.known[2862])
+-- Enchanting: the database knows enchants by -spell id, even when the client names a scroll as output
+profsNow[3] = { "Verzauberkunst", 333, 40, 75 }
+fire("SKILL_LINES_CHANGED")
+check("new profession after SKILL_LINES_CHANGED", prof.profs["Verzauberkunst"] and prof.profs["Verzauberkunst"][1] == 40)
+trade.line, trade.name, trade.recipes = 333, "Verzauberkunst", { [7418] = { true, 38679 } }
+fire("TRADE_SKILL_SHOW")
+local ench = prof.recipes["Verzauberkunst"]
+check("enchant saved under its negative spell id and its output", ench and ench.known[-7418] and ench.known[38679])
+profsNow[3] = nil
+profsNow[2] = { "Schmiedekunst", 164, 286, 300 }
+fire("SKILL_LINES_CHANGED")
+check("skill point gain saved", prof.profs["Schmiedekunst"][1] == 286)
+check("a dropped profession takes its recipes", not prof.profs["Verzauberkunst"] and not prof.recipes["Verzauberkunst"])
+check("the other professions keep their recipes", prof.recipes["Schmiedekunst"].known[2851])
+check("a character without profile is listed", texts():find("Ränka", 1, true))
+
+-- the classic calls, for a client without GetProfessions / C_TradeSkillUI
+local modernProfs, modernTrade = GetProfessions, C_TradeSkillUI
+GetProfessions, C_TradeSkillUI = nil, nil
+local skills = { { "Berufe", true }, { "Skinning", false, 120, 150 }, { "Schwerter", false, 300, 300 }, { "Schneiderei", false, 75, 150 } }
+function GetNumSkillLines() return #skills end
+function GetSkillLineInfo(i) local x = skills[i]; return x[1], x[2], nil, x[3], 0, 0, x[4] end
+local cp, _, via = ns.Profile.readProfessions()
+check("classic skill list read by name", via == "GetSkillLineInfo" and cp["Kürschnerei"][1] == 120 and cp["Schneiderei"][2] == 150)
+check("weapon skills are not professions", cp["Schwerter"] == nil)
+local tradeRows = { { "Stoff", "header" }, { "Leinenbeutel", "easy", "|Hitem:4238::::|h[Leinenbeutel]|h" } }
+function GetNumTradeSkills() return #tradeRows end
+function GetTradeSkillInfo(i) return tradeRows[i][1], tradeRows[i][2] end
+function GetTradeSkillItemLink(i) return tradeRows[i][3] end
+function GetTradeSkillLine() return "Schneiderei", 75, 150 end
+local craftRows = { { "Armschiene - Schwache Gesundheit", "", "optimal", "|Henchant:7418|h[Armschiene]|h" } }
+function GetNumCrafts() return #craftRows end
+function GetCraftInfo(i) return craftRows[i][1], craftRows[i][2], craftRows[i][3] end
+function GetCraftItemLink(i) return craftRows[i][4] end
+function GetCraftDisplaySkillLine() return "Verzauberkunst", 40, 75 end
+fire("TRADE_SKILL_SHOW")
+check("classic trade skill window read", prof.recipes["Schneiderei"] and prof.recipes["Schneiderei"].known[4238])
+fire("CRAFT_SHOW")
+check("classic enchanting window read", prof.recipes["Verzauberkunst"] and prof.recipes["Verzauberkunst"].known[-7418])
+GetProfessions, C_TradeSkillUI = modernProfs, modernTrade
+GetNumSkillLines, GetSkillLineInfo = nil, nil
+
+local printed = #prints
+SlashCmdList.WERKBANK("debug")
+local out = table.concat(prints, "\n", printed + 1)
+check("/werkbank debug names the client and the skill lines", out:find("Interface 16001", 1, true) and out:find("Skill-Linie 164", 1, true), out)
+check("/werkbank debug reports the last recipe read", out:find("Rezepte über GetCraftInfo: Verzauberkunst", 1, true)
+  and out:find("1 von 151", 1, true), out)
 
 -- ---------- export ----------
 SlashCmdList.WERKBANK("export")

@@ -12,6 +12,9 @@ local main, importBox, exportBox
 local rows = {}
 local namesMissing, refreshQueued = false, false
 
+-- a chat line with the addon's prefix
+function UI.say(text) print(ACCENT .. "Werkbank:|r " .. text) end
+
 -- ---------- items ----------
 function UI.itemName(id)
   if id < 0 then
@@ -78,10 +81,13 @@ local function getRow(i)
   r.name:SetPoint("LEFT", r.icon, "RIGHT", 4, 0); r.name:SetPoint("RIGHT", r.who, "LEFT", -4, 0)
   r.name:SetJustifyH("LEFT"); r.name:SetWordWrap(false)
   r:SetScript("OnEnter", function(self)
-    if not self.itemID then return end
+    if not self.itemID and not self.extra then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    if self.itemID > 0 then GameTooltip:SetItemByID(self.itemID) else GameTooltip:SetSpellByID(-self.itemID) end
-    if self.extra then GameTooltip:AddLine(self.extra, 0.8, 0.8, 0.8, true) end
+    if not self.itemID then GameTooltip:SetText(self.extra, 1, 1, 1, 1, true)
+    else
+      if self.itemID > 0 then GameTooltip:SetItemByID(self.itemID) else GameTooltip:SetSpellByID(-self.itemID) end
+      if self.extra then GameTooltip:AddLine(self.extra, 0.8, 0.8, 0.8, true) end
+    end
     GameTooltip:Show()
   end)
   r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -89,7 +95,59 @@ local function getRow(i)
   return r
 end
 
--- the rows of the window: section headers, items, crafts, mail
+-- "Ulfrik" in the class color
+local function classColored(name, classFile)
+  local c = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+  if c and c.colorStr then return "|c" .. c.colorStr .. name .. "|r" end
+  return name
+end
+local function recipeTip(r)
+  if not r then return "Rezepte: einmal das Berufsfenster öffnen, dann kennt die Werkbank sie." end
+  return "Rezepte zuletzt gelesen am " .. date("%d.%m. %H:%M", r.at)
+end
+
+-- every character that logged in with the addon: the current one first, then by name
+local function charLines(out)
+  local Core, Data = ns.Core, ns.Data
+  local db, mine = Core.db(), Core.me()
+  local list = {}
+  for _, c in pairs(db.chars) do list[#list + 1] = c end
+  table.sort(list, function(a, b)
+    if (a == mine) ~= (b == mine) then return a == mine end
+    return a.name < b.name
+  end)
+  out[#out + 1] = { header = "Charaktere" }
+  for _, c in ipairs(list) do
+    local p = c.profile
+    if not p then
+      out[#out + 1] = { text = c.name, who = "", count = "",
+        extra = c.name .. " war seit dem Update der Werkbank noch nicht eingeloggt. Beim nächsten Login liest sie Stufe, Berufe und Skillpunkte." }
+    else
+      out[#out + 1] = { text = classColored(c.name, p.classFile), who = p.class or "", count = p.level and ("Stufe " .. p.level) or "",
+        extra = table.concat({ p.race or "", p.class or "", p.faction or "" }, " ") .. ", Stand " .. date("%d.%m. %H:%M", p.at) }
+      local profs = {}
+      for prof in pairs(p.profs) do profs[#profs + 1] = prof end
+      table.sort(profs)
+      if #profs == 0 then out[#out + 1] = { text = "    |cffa0a0a0keine Berufe|r" } end
+      for _, prof in ipairs(profs) do
+        local s = p.profs[prof]
+        local inDb, r = Data.byProf[prof], p.recipes[prof]
+        local who = ""
+        if inDb then
+          -- how many of the database's recipes this character has learned
+          local n = 0
+          if r then for _, i in ipairs(inDb) do if r.known[Data.recipes[i][1]] then n = n + 1 end end end
+          who = r and string.format("%d/%d Rezepte", n, #inDb) or "|cffa0a0a0Fenster öffnen|r"
+        end
+        out[#out + 1] = { text = "    " .. prof, who = who, count = string.format("%d/%d", s[1], s[2]),
+          extra = inDb and (prof .. ": " .. recipeTip(r)) or nil }
+      end
+    end
+  end
+  return out
+end
+
+-- the rows of the window: section headers, items, crafts, mail, then the characters
 local function buildLines()
   local Core = ns.Core
   local S, R = Core.list(), Core.result()
@@ -98,7 +156,7 @@ local function buildLines()
     out[1] = { header = "Noch keine Liste." }
     out[2] = { text = "Auf der Werkbank-Seite „Für Addon kopieren“," }
     out[3] = { text = "dann hier /werkbank import und Strg+V." }
-    return out
+    return charLines(out)
   end
   local my, only = Core.myIndex(), Core.db().ui.onlyMe
   local function who(i) return i >= 0 and S.chars[i + 1] or "Niemand" end
@@ -150,7 +208,7 @@ local function buildLines()
     return { id = x.id, name = string.format("%d× %s", x.qty, UI.itemName(x.id)), who = who(x.from) .. " → " .. who(x.to),
       me = x.from == my, count = "" }
   end)
-  return out
+  return charLines(out)
 end
 
 local function statusText()
@@ -180,7 +238,7 @@ function UI.refresh()
     elseif l.text then
       r.icon:Hide()
       r.name:SetFontObject("GameFontHighlightSmall"); r.name:SetText(l.text); r.name:SetTextColor(1, 1, 1)
-      r.who:SetText(""); r.count:SetText("")
+      r.who:SetText(l.who or ""); r.count:SetText(l.count or "")
     else
       r.icon:Show(); r.icon:SetTexture(itemIcon(l.id))
       r.name:SetFontObject("GameFontHighlightSmall"); r.name:SetText(l.name); r.name:SetTextColor(qualityColor(l.id))
@@ -263,7 +321,7 @@ function UI.showImport()
       local ok, err = ns.Core.setList(f.edit:GetText())
       if not ok then f.msg:SetText("|cffd06060" .. err .. "|r"); return end
       f:Hide()
-      print(ACCENT .. "Werkbank:|r Liste übernommen.")
+      UI.say("Liste übernommen.")
       if not main then createMain() end
       main:Show()
     end)
@@ -320,9 +378,11 @@ function UI.init()
     local cmd = string.lower(string.match(msg or "", "^%s*(%S*)") or "")
     if cmd == "import" then UI.showImport()
     elseif cmd == "export" then UI.showExport()
+    elseif cmd == "debug" then ns.Profile.debug()
     elseif cmd == "" then UI.toggle()
     else
-      print(ACCENT .. "Werkbank:|r /werkbank (Liste), /werkbank import (Liste von der Seite einfügen), /werkbank export (Bestand für die Seite)")
+      UI.say("/werkbank (Liste und Charaktere), /werkbank import (Liste von der Seite einfügen), "
+        .. "/werkbank export (Bestand für die Seite), /werkbank debug (was der Client über Berufe sagt)")
     end
   end
 end
