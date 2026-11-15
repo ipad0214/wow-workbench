@@ -80,6 +80,17 @@ local function getRow(i)
   r.name = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   r.name:SetPoint("LEFT", r.icon, "RIGHT", 4, 0); r.name:SetPoint("RIGHT", r.who, "LEFT", -4, 0)
   r.name:SetJustifyH("LEFT"); r.name:SetWordWrap(false)
+  -- list entries: -, +, x in the "who" column
+  local function small(text, x, delta)
+    local b = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+    b:SetSize(20, 16); b:SetText(text); b:SetPoint("RIGHT", r.count, "LEFT", x, 0); b:Hide()
+    b:SetScript("OnClick", function()
+      local e = ns.Core.shop()[r.shop]
+      if e then ns.Core.setShopQty(r.shop, delta and (e.qty + delta) or 0) end
+    end)
+    return b
+  end
+  r.shopButtons = { small("x", -4), small("+", -26, 1), small("-", -48, -1) }
   r:SetScript("OnEnter", function(self)
     if not self.itemID and not self.extra then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -154,9 +165,15 @@ local function buildLines()
   local out = {}
   if not S or not R then
     out[1] = { header = "Noch keine Liste." }
-    out[2] = { text = "Auf der Werkbank-Seite „Für Addon kopieren“," }
-    out[3] = { text = "dann hier /werkbank import und Strg+V." }
+    out[2] = { text = "Im Berufsfenster ein Rezept wählen und" }
+    out[3] = { text = "„Auf die Werkbank“ klicken." }
     return charLines(out)
+  end
+  -- what is on the list, as entered: product and how often to craft it
+  out[#out + 1] = { header = "Liste" }
+  for i, e in ipairs(Core.shop()) do
+    out[#out + 1] = { id = e.item, name = UI.itemName(e.item), shop = i, who = "", count = e.qty .. "×",
+      extra = "Rezept: " .. ns.Plan.profOf(e.r) }
   end
   local my, only = Core.myIndex(), Core.db().ui.onlyMe
   local function who(i) return i >= 0 and S.chars[i + 1] or "Niemand" end
@@ -205,7 +222,7 @@ local function buildLines()
     return l
   end)
   section("Post verschicken", mail, function(x)
-    return { id = x.id, name = string.format("%d× %s", x.qty, UI.itemName(x.id)), who = who(x.from) .. " → " .. who(x.to),
+    return { id = x.id, name = string.format("%d× %s", x.qty, UI.itemName(x.id)), who = who(x.from) .. " » " .. who(x.to),
       me = x.from == my, count = "" }
   end)
   return charLines(out)
@@ -215,7 +232,7 @@ local function statusText()
   local Core = ns.Core
   local S, db = Core.list(), Core.db()
   local parts = {}
-  if S then parts[#parts + 1] = "Liste vom " .. date("%d.%m. %H:%M", S.t) end
+  if S and S.t > 0 then parts[#parts + 1] = "Liste vom " .. date("%d.%m. %H:%M", S.t) end
   local noBank = {}
   for _, c in pairs(db.chars) do if not c.bank then noBank[#noBank + 1] = c.name end end
   table.sort(noBank)
@@ -230,7 +247,8 @@ function UI.refresh()
   local lines = buildLines()
   for i, l in ipairs(lines) do
     local r = getRow(i)
-    r.itemID, r.extra = l.id, (l.extra ~= "" and l.extra) or nil
+    r.itemID, r.extra, r.shop = l.id, (l.extra ~= "" and l.extra) or nil, l.shop
+    for _, b in ipairs(r.shopButtons) do if l.shop then b:Show() else b:Hide() end end
     if l.header then
       r.icon:Hide()
       r.name:SetFontObject("GameFontNormal"); r.name:SetText(l.header); r.name:SetTextColor(1, 0.82, 0)
@@ -276,6 +294,12 @@ local function createMain()
   main.only:SetScript("OnClick", function(self) ns.Core.db().ui.onlyMe = self:GetChecked() and true or false; UI.refresh() end)
   main.onlyLabel = main:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   main.onlyLabel:SetPoint("LEFT", main.only, "RIGHT", 2, 0)
+  local clear = CreateFrame("Button", nil, main, "UIPanelButtonTemplate")
+  clear:SetSize(110, 20); clear:SetPoint("TOPRIGHT", -12, -28); clear:SetText("Liste leeren")
+  clear:SetScript("OnClick", function()
+    if #ns.Core.shop() == 0 then return end
+    if StaticPopup_Show then StaticPopup_Show("WERKBANK_CLEAR") else ns.Core.clearShop() end
+  end)
 
   local scroll = CreateFrame("ScrollFrame", nil, main, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", 12, -52); scroll:SetPoint("BOTTOMRIGHT", -32, 30)
@@ -368,6 +392,10 @@ local function onTooltip(tooltip, data)
 end
 
 function UI.init()
+  if StaticPopupDialogs then
+    StaticPopupDialogs.WERKBANK_CLEAR = { text = "Die Werkbank-Liste leeren?", button1 = YES or "Ja", button2 = NO or "Nein",
+      OnAccept = function() ns.Core.clearShop() end, timeout = 0, whileDead = true, hideOnEscape = true }
+  end
   if TooltipDataProcessor and Enum and Enum.TooltipDataType then
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
       pcall(onTooltip, tooltip, data)   -- never break a tooltip because of the list
@@ -381,7 +409,8 @@ function UI.init()
     elseif cmd == "debug" then ns.Profile.debug()
     elseif cmd == "" then UI.toggle()
     else
-      UI.say("/werkbank (Liste und Charaktere), /werkbank import (Liste von der Seite einfügen), "
+      UI.say("/werkbank (Liste und Charaktere; Rezepte kommen im Berufsfenster mit „Auf die Werkbank“ dazu), "
+        .. "/werkbank import (Liste von der Seite übernehmen), "
         .. "/werkbank export (Bestand für die Seite), /werkbank debug (was der Client über Berufe sagt)")
     end
   end

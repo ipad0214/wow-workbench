@@ -23,7 +23,7 @@ Internet → nginx-proxy (TLS) → wow-auth (oauth2-proxy, group /gamers) ─┐
 | `api/server.mjs` | Per-account storage: `GET /api/me`, `GET/PUT /api/state`; armory lookup `GET /api/armory`; AH prices `GET /api/prices`. `node:http` + `node:sqlite`, no npm dependencies |
 | `api/armory.mjs`, `api/ah.mjs`, `api/validate.mjs`, `api/test/` | Armory page parser, AH price cache, state validation, and their tests (`node --test "api/test/*.test.mjs"`, Node ≥ 22.5 for `node:sqlite`) |
 | `addon/Werkbank/`, `addon/build.sh`, `addon/build-data.mjs` | The in-game addon; `build-data.mjs` writes `Werkbank/Data.lua` from `site/data.js` (committed), `build.sh` runs it and packs the addon into `site/addon/Werkbank.zip` (the download on the page, not in git) |
-| `test/sync/`, `test/addon/` | Shared fixtures for `site/sync.js` and the addon (`node --test test/sync/`, `lua test/sync/run.lua`), addon smoke test (`lua test/addon/smoke.lua`), recipe database (`node --test test/addon/`, `lua test/addon/data.lua`) |
+| `test/sync/`, `test/addon/`, `test/plan/` | Shared fixtures for `site/sync.js` and the addon (`node --test test/sync/`, `lua test/sync/run.lua`), addon smoke test (`lua test/addon/smoke.lua`), recipe database (`node --test test/addon/`, `lua test/addon/data.lua`), the planner: website vs. addon on the same fixtures (`node --test test/plan/`, `lua test/plan/run.lua`; after a planner change `UPDATE=1 node --test test/plan/`) |
 | `docker-compose.yml` | `wow-api`, `wow-web`, `wow-auth` |
 | `docker-compose.dev.yml`, `dev/` | Local development with a fake login (see below) |
 | `.env.example` | Secrets template; the real `.env` lives only on jupiter (chmod 600) |
@@ -117,8 +117,13 @@ reach the network; the data moves as text (details and format: `docs/addon-sync.
 - **Characters:** every character that logs in with the addon saves its level, class, race, faction,
   professions with skill points, and, once its profession window was opened, the recipes it has
   learned. All characters of the WoW account see each other's profiles (section "Charaktere" in
-  `/werkbank`); `/werkbank debug` prints what the client returns for professions. First step towards
-  an addon that plans without the website: `docs/addon-standalone.md`.
+  `/werkbank`); `/werkbank debug` prints what the client returns for professions.
+- **Planning in game:** the game's profession window gets the buttons "Auf die Werkbank" (puts the
+  selected recipe on the list, as often as the window's quantity box says) and "Werkbank" (opens the
+  list). The addon plans the list itself with the same rules as the page (`Plan.lua`), using the
+  characters' profiles; a character that has learned a recipe crafts it before one that hasn't. The list
+  window shows the entries with `-`/`+`/`x` and "Liste leeren". `/werkbank import` still takes a list
+  from the page and replaces the in-game list. Plan and steps: `docs/addon-standalone.md`.
 - Friends download the addon with "Addon herunterladen" in the page header (`/addon/Werkbank.zip`) and unpack it into
   `Interface/AddOns` of their Forever client.
 

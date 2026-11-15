@@ -19,24 +19,27 @@ Changed on 2026-11-15 (user's request): instead of an own catalogue window, step
 profession window, which already has search and filters. The own search (step 3) only covers what
 that window can't show: recipes of professions the current character doesn't have.
 
-## Step 2 in detail (proposal)
+## Step 2 in detail
 
 ### 2.1 In the profession window
 - Next to the game's create buttons: a quantity box and a button **"Auf die Werkbank"**. It puts the
   selected recipe's product × quantity on the list (again: the quantity adds up).
 - A button **"Werkbank"** at the top of the profession window opens and closes the Werkbank window.
-- Recipes already on the list get a small marker in the recipe list (if the frame allows it without
-  touching Blizzard's code; otherwise only in the recipe's detail view).
+- A line above the button shows how often the selected recipe is on the list ("Auf der Werkbank: 3×").
+  A marker inside Blizzard's recipe list itself is left out: it would mean hooking Blizzard's list rows.
 - Works with the modern window (`ProfessionsFrame`) and the classic one (`TradeSkillFrame`, Enchanting's
   `CraftFrame`); which one Forever uses is answered by `/werkbank debug`. The buttons are attached when
   the window loads, nothing of Blizzard's is replaced.
 
 ### 2.2 The list and the planner in Lua
-- `WerkbankDB.shop = { { id, qty } }`: the list, account-wide, like the website's shopping list.
+- `WerkbankDB.shop = { { item, r, qty } }`: the list, account-wide, like the website's shopping list
+  (product, recipe index, how often to craft it). An old `WB1` list of addon 1.0 is taken over once.
 - New `Plan.lua`: the website's `listStructure()` with `pickRecipe`, `crafterFor` (highest skill;
   learned recipes from step 1 decide first) and the gatherers, built from `Data.lua` and the profiles.
   It produces the same structure as a decoded `WB1` string, so `Net.lua` (netting against the stock)
-  and the window stay as they are. Tested against the website with shared fixtures, like `test/sync/`.
+  and the window stay as they are. `test/plan/plan.test.mjs` runs the website's own planner functions
+  (taken out of `index.html`) on 80 generated cases and writes the fixtures; `test/plan/run.lua` checks
+  `Plan.lua` against them. Only the characters with a profile take part in the plan.
 - The window gets the list entries on top: name, quantity, `-`/`+`, remove.
 - `/werkbank import` stays for now: an imported list replaces the in-game list.
 

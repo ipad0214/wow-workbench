@@ -39,6 +39,19 @@ installing, and again after a big client patch.
 - [ ] Log in a second character → the first one is still listed with its professions and recipes.
 - [ ] Gain a skill point or learn a recipe → the section updates without `/reload`.
 
+## Planning in the profession window
+- [ ] Open a profession window → next to the create buttons: "Werkbank" and "Auf die Werkbank". Note
+      which window it is (modern with the recipe list on the left, or the classic narrow one): ________
+- [ ] Select a recipe, set the quantity box to 3, "Auf die Werkbank" → chat line "…: 3× auf der Werkbank",
+      above the button "Auf der Werkbank: 3×". Click again → 6×.
+- [ ] Select another recipe → the line above the button disappears; back to the first → it shows again.
+- [ ] Search in the window, pick a recipe from the result, add it → it is on the list.
+- [ ] "Werkbank" opens the list window: section "Liste" with both entries, `-`/`+`/`x` change them, and
+      Farmen / Kaufen / Herstellen are planned with your characters (crafter = the one with the skill).
+- [ ] Enchanting (if a character has it): an enchant can be added too.
+- [ ] "Liste leeren" asks first, then empties the list.
+- [ ] `/werkbank import` with a list from the page → it replaces the in-game list.
+
 ## If something fails
 `/console scriptErrors 1` shows Lua errors in game. Note the message and the line; the file names
 (`Scan.lua:42`) point straight into `addon/Werkbank/`.
