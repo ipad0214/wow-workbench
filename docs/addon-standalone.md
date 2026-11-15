@@ -48,7 +48,12 @@ that window can't show: recipes of professions the current character doesn't hav
   Their gather groups are unknown, so their own reagents count as "Drop / AH" unless the database
   knows them.
 
-### 2.3 Not in step 2
+### 2.3 Tracker (added on the user's request)
+A compact list on the screen edge like Questie's quest tracker (`Tracker.lua`): only the current
+character's rows and rows nobody is assigned to; done rows stay, green with a check mark. The window,
+the profession window's note and the tracker are redrawn through one hook (`Core.onUpdate`).
+
+### 2.4 Not in step 2
 The own search for other characters' professions (step 3), AH prices (step 4).
 
 ## Step 1 in detail

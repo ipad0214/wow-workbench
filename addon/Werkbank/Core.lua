@@ -184,6 +184,12 @@ local function normalizeShop()
   db.shop = out
 end
 
+-- what shows the plan (list window, profession window note, tracker) registers here and is redrawn
+-- after every update
+local listeners = {}
+function Core.onUpdate(fn) listeners[#listeners + 1] = fn end
+function Core.notify() for _, fn in ipairs(listeners) do fn() end end
+
 -- plan the list and net the stock against it; quiet: no chat message for rows that just got done
 function Core.update(quiet)
   totals = {}
@@ -212,8 +218,7 @@ function Core.update(quiet)
   else
     result, Core.byId = nil, {}
   end
-  ns.UI.refresh()
-  if ns.Craft then ns.Craft.refresh() end   -- "Auf der Werkbank: n×" in the profession window
+  Core.notify()
 end
 
 -- a WB1 list from the website replaces the shopping list: its items, planned here with the characters'

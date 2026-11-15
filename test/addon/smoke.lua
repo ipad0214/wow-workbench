@@ -26,13 +26,14 @@ local function mock(kind, name)
   function methods:SetFrameLevel(v) self.level = v end
   function methods:RegisterEvent(e) events[e] = events[e] or {}; table.insert(events[e], self) end
   function methods:GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
-  function methods:CreateFontString() return mock("FontString") end
+  function methods:CreateFontString() local f = mock("FontString"); f.parentFrame = self; return f end
   function methods:CreateTexture() return mock("Texture") end
   function methods:AddLine(t) self.lines = self.lines or {}; table.insert(self.lines, t) end
   return setmetatable(o, { __index = function(_, k) return methods[k] or function() end end })
 end
-function CreateFrame(kind, name)
+function CreateFrame(kind, name, parent)
   local f = mock(kind, name)
+  f.parentFrame = parent
   if kind == "Frame" and name then f.shown = true end
   if name then _G[name] = f end
   return f
@@ -182,11 +183,48 @@ check("window lists the characters", all:find("Charaktere", 1, true) and all:fin
 check("window shows skill points", all:find("Schmiedekunst", 1, true) and all:find("285/300", 1, true), all)
 check("window asks to open the profession window", all:find("Fenster öffnen", 1, true), all)
 
+-- ---------- the tracker on the screen edge ----------
+local tracker = frameNamed("WerkbankTracker")
+-- the shown texts of the tracker and its heading, top to bottom as created
+local function trackerText()
+  local t = {}
+  for _, f in ipairs(frames) do
+    local p = f.parentFrame
+    if f.kind == "FontString" and f.shown and f.text and (p == tracker or (p and p.parentFrame == tracker)) then t[#t + 1] = f.text end
+  end
+  return table.concat(t, "\n")
+end
+local function trackerHeader() for _, f in ipairs(frames) do if f.kind == "Button" and f.parentFrame == tracker then return f end end end
+check("tracker shows up with a list", tracker and tracker.shown)
+local tt = trackerText()
+check("tracker names the character", tt:find("Werkbank · Ulfrik", 1, true), tt)
+check("tracker lists what to farm and craft", tt:find("Farmen", 1, true) and tt:find("Kupfererz", 1, true) and tt:find("3/10", 1, true)
+  and tt:find("noch 10×", 1, true), tt)
+trackerHeader().scripts.OnClick(trackerHeader(), "LeftButton")
+check("left click on the heading folds it", not trackerText():find("Kupfererz", 1, true) and trackerText():find("Werkbank", 1, true))
+trackerHeader().scripts.OnClick(trackerHeader(), "LeftButton")
+check("and unfolds it", trackerText():find("Kupfererz", 1, true))
+-- Ränka mines (earlier in the name order than Ulfrik, so ore and smelting go to her): off Ulfrik's tracker
+db.chars["Everlook-Ränka"].profile = { profs = { Bergbau = { 300, 300 } }, recipes = {} }
+ns.Core.update(true)
+local tt2 = trackerText()
+check("rows of another character stay off the tracker", not tt2:find("Kupfererz", 1, true) and not tt2:find("Kupferbarren", 1, true)
+  and tt2:find("Kupferkettengürtel", 1, true) and texts():find("Kupfererz", 1, true), tt2)
+db.chars["Everlook-Ränka"].profile = nil
+ns.Core.update(true)
+SlashCmdList.WERKBANK("tracker")
+check("/werkbank tracker hides it", not tracker.shown and db.ui.tracker.hidden and main.tracker.checked == false)
+main.tracker.checked = true
+main.tracker.scripts.OnClick(main.tracker)
+check("the checkbox in the window shows it again", tracker.shown and not db.ui.tracker.hidden)
+
 -- ---------- looting: 7 more ore -> ore row done, chat message ----------
 containers[0][1] = { 2770, 10 }
 fire("BAG_UPDATE_DELAYED")
 check("ore complete after looting", ns.Core.byId[2770].have == 10)
 check("chat message for the completed row", prints[#prints] and prints[#prints]:find("Kupfererz vollständig", 1, true), prints[#prints])
+check("tracker: a done row turns green with a check mark", trackerText():find("|cff40c040Kupfererz", 1, true)
+  and trackerText():find("ReadyCheck-Ready", 1, true), trackerText())
 
 -- ---------- bank: only read while open ----------
 containers[6] = { { 2840, 4 } }
@@ -393,6 +431,7 @@ check("export written at logout and /reload", db.export and db.export:sub(1, 4) 
 buttonWithText("Liste leeren").scripts.OnClick()
 check("'Liste leeren' empties the list", #db.shop == 0 and ns.Core.list() == nil)
 check("the window explains how to fill it", texts():find("Auf die Werkbank“ klicken", 1, true))
+check("no list, no tracker", not tracker.shown)
 
 -- ---------- the list of addon 1.0 is taken over once ----------
 local ns2 = {}

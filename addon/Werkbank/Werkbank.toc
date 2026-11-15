@@ -2,7 +2,7 @@
 ## Title: Werkbank
 ## Notes: Einkaufs- und Farmliste der Forever Werkbank, mit dem Bestand deiner Charaktere aus Taschen, Bank und Post, ihren Berufen und Rezepten.
 ## Author: Forever Werkbank
-## Version: 1.2.0
+## Version: 1.3.0
 ## SavedVariables: WerkbankDB
 ## IconTexture: Interface\Icons\Trade_BlackSmithing
 
@@ -14,4 +14,5 @@ Scan.lua
 Core.lua
 Profile.lua
 UI.lua
+Tracker.lua
 Craft.lua

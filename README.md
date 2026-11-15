@@ -123,7 +123,11 @@ reach the network; the data moves as text (details and format: `docs/addon-sync.
   list). The addon plans the list itself with the same rules as the page (`Plan.lua`), using the
   characters' profiles; a character that has learned a recipe crafts it before one that hasn't.
   Recipes WoW Forever added (not in `site/data.js`) are read from the game when selected in the window
-  (product, yield, basic reagents) and kept in `WerkbankDB.extra`; only the addon plans with them. The list
+  (product, yield, basic reagents) and kept in `WerkbankDB.extra`; only the addon plans with them.
+- **Tracker:** a compact list on the screen edge like Questie's quest tracker, with what the current
+  character has to farm, buy, craft and send (and rows nobody is assigned to); done rows stay green with
+  a check mark. Heading: left click folds, drag moves, right click opens the list. On/off with the
+  checkbox "Tracker" in the list window or `/werkbank tracker`. The list
   window shows the entries with `-`/`+`/`x` and "Liste leeren". `/werkbank import` still takes a list
   from the page and replaces the in-game list. Plan and steps: `docs/addon-standalone.md`.
 - Friends download the addon with "Addon herunterladen" in the page header (`/addon/Werkbank.zip`) and unpack it into

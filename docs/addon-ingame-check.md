@@ -55,6 +55,14 @@ installing, and again after a big client patch.
 - [ ] "Liste leeren" asks first, then empties the list.
 - [ ] `/werkbank import` with a list from the page → it replaces the in-game list.
 
+## Tracker
+- [ ] With a list: on the right below the minimap "- Werkbank · <character>" with this character's rows.
+- [ ] Loot an item of the list → its row counts up; complete → green with a check mark.
+- [ ] Heading: left click folds/unfolds, drag moves (position stays after `/reload`), right click opens
+      the list window.
+- [ ] Checkbox "Tracker" in the list window and `/werkbank tracker` hide and show it.
+- [ ] Log in another character → only its rows.
+
 ## If something fails
 `/console scriptErrors 1` shows Lua errors in game. Note the message and the line; the file names
 (`Scan.lua:42`) point straight into `addon/Werkbank/`.

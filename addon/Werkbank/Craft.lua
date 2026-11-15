@@ -93,6 +93,7 @@ function Craft.refresh()
     end
   end
 end
+Core.onUpdate(Craft.refresh)
 -- selection changes arrive before the window shows the new recipe; read it right after
 local function refreshSoon() C_Timer.After(0, Craft.refresh) end
 

@@ -63,6 +63,7 @@ stay readable. So the addon uses the modern API (`C_Container`, `C_Item`, `Enum.
 | `Profile.lua` | each character's level, class, race, professions with skill points and learned recipes; `/werkbank debug` |
 | `Plan.lua` | the planner: the website's `buildPlan`/`listStructure` in Lua; builds the list structure from the shopping list and the profiles (`test/plan/`) |
 | `Craft.lua` | the buttons "Auf die Werkbank" and "Werkbank" in the game's profession window |
+| `Tracker.lua` | the tracker on the screen edge: the current character's rows, like Questie's quest tracker |
 | `UI.lua` | list window, import/export windows, tooltip line |
 
 - **SavedVariables** `WerkbankDB` (account-wide): `list` (the decoded export), `chars["Realm-Name"] =

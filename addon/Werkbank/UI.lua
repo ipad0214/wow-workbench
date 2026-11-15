@@ -158,12 +158,50 @@ local function charLines(out)
   return out
 end
 
+-- The plan's rows, sorted as they are shown: farm, buy, crafts (deepest first) and mail, each row with its
+-- character index o (-1: nobody). keep(i, my) decides which characters' rows are taken (my: the index
+-- of the current character); mail is kept when sender or recipient is. nil while there is no list.
+-- Used by the window and the tracker.
+function UI.planRows(keep)
+  local Core = ns.Core
+  local S, R = Core.list(), Core.result()
+  if not S or not R then return nil end
+  local my = Core.myIndex()
+  local function rank(i) return (i == my and -1) or (i >= 0 and i) or 999 end
+  local rows = { farm = {}, buy = {}, crafts = {}, mail = {}, my = my, chars = S.chars }
+  for n, f in ipairs(R.farm) do
+    if keep(f.o, my) then
+      local t = BUY[f.g] and rows.buy or rows.farm
+      t[#t + 1] = { id = f.id, o = f.o, need = f.need, have = f.have, tag = GROUP[f.g], name = UI.itemName(f.id), n = n }
+    end
+  end
+  for n, s in ipairs(R.crafts) do
+    if keep(s.c, my) then
+      rows.crafts[#rows.crafts + 1] = { id = s.id, o = s.c, need = s.need, have = s.have, crafts = s.crafts, depth = s.depth,
+        name = UI.itemName(s.id), n = n }
+    end
+  end
+  for n, m in ipairs(R.mail) do
+    if keep(m.from, my) or keep(m.to, my) then rows.mail[#rows.mail + 1] = { id = m.id, from = m.from, to = m.to, qty = m.qty, n = n } end
+  end
+  local byWho = function(a, b)
+    if rank(a.o) ~= rank(b.o) then return rank(a.o) < rank(b.o) end
+    if a.name ~= b.name then return a.name < b.name end
+    return a.n < b.n
+  end
+  table.sort(rows.farm, byWho); table.sort(rows.buy, byWho)
+  -- deepest first, so intermediates come before what needs them
+  table.sort(rows.crafts, function(a, b) if a.depth ~= b.depth then return a.depth > b.depth end return a.n < b.n end)
+  return rows
+end
+
 -- the rows of the window: section headers, items, crafts, mail, then the characters
 local function buildLines()
   local Core = ns.Core
-  local S, R = Core.list(), Core.result()
+  local only = Core.db().ui.onlyMe
+  local rows = UI.planRows(function(i, my) return not only or i == my end)
   local out = {}
-  if not S or not R then
+  if not rows then
     out[1] = { header = "Noch keine Liste." }
     out[2] = { text = "Im Berufsfenster ein Rezept wählen und" }
     out[3] = { text = "„Auf die Werkbank“ klicken." }
@@ -175,33 +213,8 @@ local function buildLines()
     out[#out + 1] = { id = e.item, name = UI.itemName(e.item), shop = i, who = "", count = e.qty .. "×",
       extra = "Rezept: " .. ns.Plan.profOf(e.r) }
   end
-  local my, only = Core.myIndex(), Core.db().ui.onlyMe
-  local function who(i) return i >= 0 and S.chars[i + 1] or "Niemand" end
-  local function rank(i) return (i == my and -1) or (i >= 0 and i) or 999 end
-  local function mine(i) return not only or i == my end
-  local farm, buy, crafts, mail = {}, {}, {}, {}
-  for n, f in ipairs(R.farm) do
-    if mine(f.o) then
-      local t = BUY[f.g] and buy or farm
-      t[#t + 1] = { id = f.id, o = f.o, need = f.need, have = f.have, tag = GROUP[f.g], name = UI.itemName(f.id), n = n }
-    end
-  end
-  for n, s in ipairs(R.crafts) do
-    if mine(s.c) then
-      crafts[#crafts + 1] = { id = s.id, o = s.c, need = s.need, have = s.have, crafts = s.crafts, depth = s.depth, name = UI.itemName(s.id), n = n }
-    end
-  end
-  for n, m in ipairs(R.mail) do
-    if mine(m.from) or mine(m.to) then mail[#mail + 1] = { id = m.id, from = m.from, to = m.to, qty = m.qty, n = n } end
-  end
-  local byWho = function(a, b)
-    if rank(a.o) ~= rank(b.o) then return rank(a.o) < rank(b.o) end
-    if a.name ~= b.name then return a.name < b.name end
-    return a.n < b.n
-  end
-  table.sort(farm, byWho); table.sort(buy, byWho)
-  -- deepest first, so intermediates come before what needs them
-  table.sort(crafts, function(a, b) if a.depth ~= b.depth then return a.depth > b.depth end return a.n < b.n end)
+  local my = rows.my
+  local function who(i) return i >= 0 and rows.chars[i + 1] or "Niemand" end
 
   local function section(name, list, line)
     if #list == 0 then return end
@@ -214,14 +227,14 @@ local function buildLines()
     return { id = x.id, name = x.name, who = who(x.o), me = x.o == my, count = progress(x.have, x.need),
       extra = (x.tag and (x.tag .. ". ") or "") .. (#holders > 0 and ("Vorhanden: " .. table.concat(holders, ", ")) or "") }
   end
-  section("Farmen", farm, itemLine)
-  section("Kaufen", buy, itemLine)
-  section("Herstellen", crafts, function(x)
+  section("Farmen", rows.farm, itemLine)
+  section("Kaufen", rows.buy, itemLine)
+  section("Herstellen", rows.crafts, function(x)
     local l = itemLine(x)
     if x.crafts > 0 then l.name = string.format("%s  |cffa0a0a0noch %d×|r", x.name, x.crafts) end
     return l
   end)
-  section("Post verschicken", mail, function(x)
+  section("Post verschicken", rows.mail, function(x)
     return { id = x.id, name = string.format("%d× %s", x.qty, UI.itemName(x.id)), who = who(x.from) .. " » " .. who(x.to),
       me = x.from == my, count = "" }
   end)
@@ -270,12 +283,14 @@ function UI.refresh()
   main.status:SetText(statusText())
   main.onlyLabel:SetText("nur " .. ns.Core.me().name)
   main.only:SetChecked(ns.Core.db().ui.onlyMe and true or false)
+  main.tracker:SetChecked(ns.Tracker.shown())
 end
--- item names load asynchronously; render again once a batch arrived
+ns.Core.onUpdate(UI.refresh)
+-- item names load asynchronously; redraw everything that shows names once a batch arrived
 function UI.namesArrived()
-  if not namesMissing or refreshQueued or not main or not main:IsShown() then return end
+  if not namesMissing or refreshQueued then return end
   refreshQueued = true
-  C_Timer.After(0.3, function() refreshQueued = false; UI.refresh() end)
+  C_Timer.After(0.3, function() refreshQueued = false; namesMissing = false; ns.Core.notify() end)
 end
 
 local function createMain()
@@ -294,6 +309,11 @@ local function createMain()
   main.only:SetScript("OnClick", function(self) ns.Core.db().ui.onlyMe = self:GetChecked() and true or false; UI.refresh() end)
   main.onlyLabel = main:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   main.onlyLabel:SetPoint("LEFT", main.only, "RIGHT", 2, 0)
+  main.tracker = CreateFrame("CheckButton", nil, main, "UICheckButtonTemplate")
+  main.tracker:SetSize(22, 22); main.tracker:SetPoint("TOPLEFT", 150, -26)
+  main.tracker:SetScript("OnClick", function(self) ns.Tracker.setShown(self:GetChecked() and true or false) end)
+  local trackerLabel = main:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  trackerLabel:SetPoint("LEFT", main.tracker, "RIGHT", 2, 0); trackerLabel:SetText("Tracker")
   local clear = CreateFrame("Button", nil, main, "UIPanelButtonTemplate")
   clear:SetSize(110, 20); clear:SetPoint("TOPRIGHT", -12, -28); clear:SetText("Liste leeren")
   clear:SetScript("OnClick", function()
@@ -407,11 +427,13 @@ function UI.init()
     if cmd == "import" then UI.showImport()
     elseif cmd == "export" then UI.showExport()
     elseif cmd == "debug" then ns.Profile.debug()
+    elseif cmd == "tracker" then ns.Tracker.setShown(not ns.Tracker.shown())
     elseif cmd == "" then UI.toggle()
     else
       UI.say("/werkbank (Liste und Charaktere; Rezepte kommen im Berufsfenster mit „Auf die Werkbank“ dazu), "
         .. "/werkbank import (Liste von der Seite übernehmen), "
-        .. "/werkbank export (Bestand für die Seite), /werkbank debug (was der Client über Berufe sagt)")
+        .. "/werkbank tracker (Liste am Bildschirmrand an/aus), /werkbank export (Bestand für die Seite), "
+        .. "/werkbank debug (was der Client über Berufe sagt)")
     end
   end
 end
