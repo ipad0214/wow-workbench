@@ -222,10 +222,9 @@ local function buildLines()
     for _, x in ipairs(list) do out[#out + 1] = line(x) end
   end
   local function itemLine(x)
-    local holders = {}
-    for _, h in ipairs(Core.holders(x.id)) do holders[#holders + 1] = h.name .. " " .. h.n end
+    local where = Core.whereText(x.id)
     return { id = x.id, name = x.name, who = who(x.o), me = x.o == my, count = progress(x.have, x.need),
-      extra = (x.tag and (x.tag .. ". ") or "") .. (#holders > 0 and ("Vorhanden: " .. table.concat(holders, ", ")) or "") }
+      extra = (x.tag and (x.tag .. ". ") or "") .. (where ~= "" and ("Vorhanden: " .. where) or "") }
   end
   section("Farmen", rows.farm, itemLine)
   section("Kaufen", rows.buy, itemLine)
@@ -406,9 +405,8 @@ local function onTooltip(tooltip, data)
   local e = ns.Core.byId[id]
   if not e then return end
   tooltip:AddLine(ACCENT .. "Werkbank:|r " .. progress(e.have, e.need))
-  local holders = {}
-  for _, h in ipairs(ns.Core.holders(id)) do holders[#holders + 1] = h.name .. " " .. h.n end
-  if #holders > 0 then tooltip:AddLine(table.concat(holders, ", "), 0.8, 0.8, 0.8, true) end
+  local where = ns.Core.whereText(id)
+  if where ~= "" then tooltip:AddLine(where, 0.8, 0.8, 0.8, true) end
 end
 
 function UI.init()

@@ -200,6 +200,8 @@ local tt = trackerText()
 check("tracker names the character", tt:find("Werkbank · Ulfrik", 1, true), tt)
 check("tracker lists what to farm and craft", tt:find("Farmen", 1, true) and tt:find("Kupfererz", 1, true) and tt:find("3/10", 1, true)
   and tt:find("noch 10×", 1, true), tt)
+check("tracker says where the items lie: own bags first, without a name", tt:find("Taschen 3", 1, true), tt)
+check("and other characters by name", tt:find("Ränka: Taschen 2", 1, true), tt)
 trackerHeader().scripts.OnClick(trackerHeader(), "LeftButton")
 check("left click on the heading folds it", not trackerText():find("Kupfererz", 1, true) and trackerText():find("Werkbank", 1, true))
 trackerHeader().scripts.OnClick(trackerHeader(), "LeftButton")
@@ -238,6 +240,7 @@ fire("PLAYER_INTERACTION_MANAGER_FRAME_HIDE", Enum.PlayerInteractionType.Banker)
 fire("BAG_UPDATE_DELAYED")
 check("bank kept after closing", db.chars["Everlook-Ulfrik"].bank[2840] == 4)
 check("bank bars reduce the bars to smelt", ns.Core.byId[2840].have == 6, ns.Core.byId[2840].have)
+check("where: bags and bank of the current character", ns.Core.whereText(2840) == "Bank 4 · Ränka: Taschen 2", ns.Core.whereText(2840))
 
 -- ---------- mail: Ulfrik sends 3 ore to Ränka; they leave the bags but stay counted ----------
 local before = ns.Core.pool()[2770]
@@ -248,6 +251,7 @@ fire("MAIL_SEND_SUCCESS")
 fire("BAG_UPDATE_DELAYED")
 check("mail to an own character counts as on its way", #db.chars["Everlook-Ränka"].transit == 1)
 check("total ore unchanged while the mail travels", ns.Core.pool()[2770] == before, ns.Core.pool()[2770])
+check("where: mail on its way", ns.Core.whereText(2770):find("Ränka: unterwegs 3", 1, true), ns.Core.whereText(2770))
 sendItems = { { 2770, 1 } }
 SendMail("Fremder", "", "")
 fire("MAIL_SEND_SUCCESS")
@@ -267,6 +271,11 @@ check("inbox not read while the mailbox is closed", db.chars["Everlook-Ulfrik"].
 fire("MAIL_SHOW")
 fire("MAIL_INBOX_UPDATE")
 check("inbox read while open", db.chars["Everlook-Ulfrik"].mail and db.chars["Everlook-Ulfrik"].mail[2840] == 1)
+check("where: the mailbox", ns.Core.whereText(2840) == "Bank 4, Post 1 · Ränka: Taschen 2", ns.Core.whereText(2840))
+db.account = { at = 1, items = { [2840] = 5 } }
+check("where: the account bank last", ns.Core.whereText(2840):find("Ränka: Taschen 2 · Kriegsmeutenbank 5", 1, true), ns.Core.whereText(2840))
+db.account = nil
+check("where: nothing owned", ns.Core.whereText(2851) == "")
 fire("MAIL_CLOSED")
 
 -- ---------- profiles: learned recipes, skill changes, the classic calls ----------

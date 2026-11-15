@@ -62,6 +62,8 @@ installing, and again after a big client patch.
       the list window.
 - [ ] Checkbox "Tracker" in the list window and `/werkbank tracker` hide and show it.
 - [ ] Log in another character → only its rows.
+- [ ] Under a row: where the items lie. Own bags/bank/mailbox without a name ("Taschen 3, Bank 2"), other
+      characters with theirs ("Bandor: Bank 4"); mail sent to an alt shows as "unterwegs" at the alt.
 
 ## If something fails
 `/console scriptErrors 1` shows Lua errors in game. Note the message and the line; the file names

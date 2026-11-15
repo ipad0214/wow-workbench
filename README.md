@@ -126,7 +126,8 @@ reach the network; the data moves as text (details and format: `docs/addon-sync.
   (product, yield, basic reagents) and kept in `WerkbankDB.extra`; only the addon plans with them.
 - **Tracker:** a compact list on the screen edge like Questie's quest tracker, with what the current
   character has to farm, buy, craft and send (and rows nobody is assigned to); done rows stay green with
-  a check mark. Heading: left click folds, drag moves, right click opens the list. On/off with the
+  a check mark. Under each row a grey line says where the owned items lie ("Taschen 3, Bank 2 · Bandor:
+  Post 1 · Kriegsmeutenbank 2"); the item tooltip and the list window say it the same way. Heading: left click folds, drag moves, right click opens the list. On/off with the
   checkbox "Tracker" in the list window or `/werkbank tracker`. The list
   window shows the entries with `-`/`+`/`x` and "Liste leeren". `/werkbank import` still takes a list
   from the page and replaces the in-game list. Plan and steps: `docs/addon-standalone.md`.

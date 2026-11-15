@@ -1,6 +1,7 @@
 -- Werkbank addon: the tracker, a compact list on the screen edge like Questie's quest tracker. It shows
--- what the current character has to do (and rows nobody is assigned to): farm, buy, craft, send. Done
--- rows stay, green with a check mark. The heading: left click folds it, drag moves it, right click opens
+-- what the current character has to do (and rows nobody is assigned to): farm, buy, craft, send. Under
+-- a row, a grey line says where the owned items lie (bags, bank, mailbox, other characters). Done rows
+-- stay, green with a check mark. The heading: left click folds it, drag moves it, right click opens
 -- the list window. The rows take no clicks, so they never get in the way while playing.
 --
 -- WerkbankDB.ui.tracker = { hidden, collapsed, point }
@@ -58,38 +59,43 @@ local function create()
   header:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
+local COUNT_W = 70
 local function line(i)
   if lines[i] then return lines[i] end
-  local y = -HEAD - (i - 1) * LINE
   local l = {
     name = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"),
     count = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"),
   }
-  l.count:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, y); l.count:SetWidth(70); l.count:SetJustifyH("RIGHT")
-  l.name:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, y); l.name:SetPoint("RIGHT", l.count, "LEFT", -4, 0)
-  l.name:SetJustifyH("LEFT"); l.name:SetWordWrap(false)
+  l.count:SetWidth(COUNT_W); l.count:SetJustifyH("RIGHT")
+  l.name:SetJustifyH("LEFT")
   lines[i] = l
   return l
 end
 
--- { text, count, done, section } for the current character
+-- { section } | { text, count, done } | { where } for the current character
 local function entries(rows)
   local out = {}
+  -- the row, then where its items lie
+  local function item(x, count, done)
+    out[#out + 1] = { text = x.name, count = count, done = done }
+    local where = ns.Core.whereText(x.id)
+    if where ~= "" then out[#out + 1] = { where = where } end
+  end
   local function section(title, list, row)
     if #list == 0 then return end
     out[#out + 1] = { section = title }
-    for _, x in ipairs(list) do out[#out + 1] = row(x) end
+    for _, x in ipairs(list) do row(x) end
   end
-  local function have(x) return { text = x.name, count = x.have .. "/" .. x.need, done = x.have >= x.need } end
+  local function have(x) item(x, x.have .. "/" .. x.need, x.have >= x.need) end
   section("Farmen", rows.farm, have)
   section("Kaufen", rows.buy, have)
   section("Herstellen", rows.crafts, function(x)
-    return { text = x.name, count = x.crafts > 0 and ("noch " .. x.crafts .. "×") or "", done = x.crafts == 0 }
+    item(x, x.crafts > 0 and ("noch " .. x.crafts .. "×") or "", x.crafts == 0)
   end)
   local send = {}
   for _, m in ipairs(rows.mail) do if m.from == rows.my then send[#send + 1] = m end end
   section("Post", send, function(m)
-    return { text = m.qty .. "× " .. ns.UI.itemName(m.id), count = "» " .. (rows.chars[m.to + 1] or "?") }
+    out[#out + 1] = { text = m.qty .. "× " .. ns.UI.itemName(m.id), count = "» " .. (rows.chars[m.to + 1] or "?") }
   end)
   return out
 end
@@ -107,19 +113,30 @@ function Tracker.refresh()
   header.text:SetText((set.collapsed and "+ " or "- ") .. "Werkbank · " .. Core.me().name)
   local list = set.collapsed and {} or entries(rows)
   if not set.collapsed and #list == 0 then list[1] = { text = "|cffa0a0a0Nichts zu tun|r", count = "" } end
+  -- rows one under the other; a "where" line wraps, so each row is as high as its text
+  local y = HEAD
   for i, e in ipairs(list) do
     local l = line(i)
+    local indent = (e.section and 0) or (e.where and 16) or 8
+    l.name:ClearAllPoints(); l.count:ClearAllPoints()
+    l.name:SetPoint("TOPLEFT", frame, "TOPLEFT", indent, -y)
+    l.count:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -y)
+    l.name:SetWidth(WIDTH - indent - ((e.where or e.section) and 0 or COUNT_W + 4))
+    l.name:SetWordWrap(e.where and true or false)
     if e.section then
       l.name:SetFontObject("GameFontNormalSmall"); l.name:SetText(e.section); l.count:SetText("")
+    elseif e.where then
+      l.name:SetFontObject("GameFontDisableSmall"); l.name:SetText(e.where); l.count:SetText("")
     else
       l.name:SetFontObject("GameFontHighlightSmall")
-      l.name:SetText("  " .. (e.done and "|cff40c040" .. e.text .. "|r" or e.text))
+      l.name:SetText(e.done and "|cff40c040" .. e.text .. "|r" or e.text)
       l.count:SetText(e.done and DONE or e.count)
     end
     l.name:Show(); l.count:Show()
+    y = y + math.max(LINE, (l.name:GetStringHeight() or 0) + 2)
   end
   for i = #list + 1, #lines do lines[i].name:Hide(); lines[i].count:Hide() end
-  frame:SetHeight(HEAD + #list * LINE)
+  frame:SetHeight(y)
   frame:Show()
 end
 

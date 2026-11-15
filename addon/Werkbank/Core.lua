@@ -47,16 +47,32 @@ function Core.pool()
   if db.account then add(t, db.account.items) end
   return t
 end
--- { { name, n } } for one item, most first
-function Core.holders(id)
-  local out = {}
-  for key, items in pairs(totals) do
-    local n = items[id]
-    if n and n > 0 then out[#out + 1] = { name = db.chars[key].name, n = n } end
+-- Where an item lies: "Taschen 3, Bank 2 · Bandor: Bank 4, Post 1 · Kriegsmeutenbank 2". The current
+-- character comes first and without its name, then the others by name. Post: in the mailbox;
+-- unterwegs: mail from an own character that hasn't been picked up. "" when nobody has it.
+local PLACES = { { "bags", "Taschen" }, { "bank", "Bank" }, { "mail", "Post" } }
+function Core.whereText(id)
+  local me, others = nil, {}
+  for _, c in pairs(db.chars) do
+    local parts = {}
+    for _, p in ipairs(PLACES) do
+      local n = c[p[1]] and c[p[1]][id]
+      if n and n > 0 then parts[#parts + 1] = p[2] .. " " .. n end
+    end
+    local t = 0
+    for _, tr in ipairs(c.transit or {}) do t = t + (tr.items[id] or 0) end
+    if t > 0 then parts[#parts + 1] = "unterwegs " .. t end
+    if #parts > 0 then
+      local text = table.concat(parts, ", ")
+      if c == Core.me() then me = text else others[#others + 1] = { c.name, c.name .. ": " .. text } end
+    end
   end
-  if db.account and db.account.items[id] then out[#out + 1] = { name = "Kriegsmeutenbank", n = db.account.items[id] } end
-  table.sort(out, function(a, b) return a.n > b.n end)
-  return out
+  table.sort(others, function(a, b) return a[1] < b[1] end)
+  local out = { me }
+  for _, o in ipairs(others) do out[#out + 1] = o[2] end
+  local acc = db.account and db.account.items[id]
+  if acc and acc > 0 then out[#out + 1] = "Kriegsmeutenbank " .. acc end
+  return table.concat(out, " · ")
 end
 -- index of the current character in the list's characters (0-based like the list), or -1
 function Core.myIndex()

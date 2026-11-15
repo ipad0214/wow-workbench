@@ -52,6 +52,8 @@ that window can't show: recipes of professions the current character doesn't hav
 A compact list on the screen edge like Questie's quest tracker (`Tracker.lua`): only the current
 character's rows and rows nobody is assigned to; done rows stay, green with a check mark. The window,
 the profession window's note and the tracker are redrawn through one hook (`Core.onUpdate`).
+Under each row the tracker says where the owned items lie (`Core.whereText`: bags, bank, mailbox, mail
+on its way, per character, plus the account bank); item tooltip and list window use the same text.
 
 ### 2.4 Not in step 2
 The own search for other characters' professions (step 3), AH prices (step 4).
