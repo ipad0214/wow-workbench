@@ -61,6 +61,8 @@ stay readable. So the addon uses the modern API (`C_Container`, `C_Item`, `Enum.
 | `Scan.lua` | bags, bank (while open) and mailbox (while open), mail in transit between own characters |
 | `Data.lua` | the recipe database, generated from `site/data.js` by `addon/build-data.mjs` (see `docs/addon-standalone.md`) |
 | `Profile.lua` | each character's level, class, race, professions with skill points and learned recipes; `/werkbank debug` |
+| `Plan.lua` | the planner: the website's `buildPlan`/`listStructure` in Lua; builds the list structure from the shopping list and the profiles (`test/plan/`) |
+| `Craft.lua` | the buttons "Auf die Werkbank" and "Werkbank" in the game's profession window |
 | `UI.lua` | list window, import/export windows, tooltip line |
 
 - **SavedVariables** `WerkbankDB` (account-wide): `list` (the decoded export), `chars["Realm-Name"] =

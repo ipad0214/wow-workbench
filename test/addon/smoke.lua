@@ -21,6 +21,7 @@ local function mock(kind, name)
   function methods:GetText() return self.text or "" end
   function methods:SetChecked(v) self.checked = v end
   function methods:GetChecked() return self.checked end
+  function methods:SetEnabled(v) self.enabled = v end
   function methods:RegisterEvent(e) events[e] = events[e] or {}; table.insert(events[e], self) end
   function methods:GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
   function methods:CreateFontString() return mock("FontString") end
@@ -150,7 +151,8 @@ buttonWithText("Übernehmen").scripts.OnClick()
 check("bad text rejected with a message", import.shown and (import.msg.text or ""):find("Kein Werkbank"), import.msg.text)
 editBox:SetText(body .. ";\n" .. ns.Codec.checksum(body))
 buttonWithText("Übernehmen").scripts.OnClick()
-check("good text accepted", not import.shown and db.list ~= nil, import.msg.text)
+check("good text accepted", not import.shown and db.shop[1] and db.shop[1].item == 2851 and db.shop[1].qty == 2, import.msg.text)
+check("the import is planned in the addon", ns.Core.list().crafts[2851].c == 0 and ns.Core.list().chars[1] == "Ulfrik")
 local main = frameNamed("WerkbankFrame")
 check("list window opens after import", main and main.shown)
 
@@ -285,6 +287,53 @@ check("/werkbank debug names the client and the skill lines", out:find("Interfac
 check("/werkbank debug reports the last recipe read", out:find("Rezepte über GetCraftInfo: Verzauberkunst", 1, true)
   and out:find("1 von 151", 1, true), out)
 
+-- ---------- the profession window: "Auf die Werkbank" and "Werkbank" ----------
+local function shownButton(t)
+  for _, f in ipairs(frames) do if f.kind == "Button" and f.text == t and f.shown then return f end end
+end
+local selected, qtyBox = 2661, 3
+trade.line, trade.name = 164, "Schmiedekunst"
+trade.recipes = { [2661] = { true, 2851 }, [2660] = { true, 2862 }, [99999] = { true, 77777 } }
+local page = mock("Frame")
+page.SchematicForm = { GetRecipeInfo = function() return selected and { recipeID = selected } end }
+page.CreateMultipleInputBox = { GetValue = function() return qtyBox end }
+page.CreateAllButton = mock("Button")
+ProfessionsFrame = { CraftingPage = page }
+fire("ADDON_LOADED", "Blizzard_Professions")
+local addBtn = buttonWithText("Auf die Werkbank")
+check("buttons in the profession window", addBtn and buttonWithText("Werkbank"))
+check("the note says the selected recipe is on the list", texts():find("Auf der Werkbank: 2×", 1, true), texts())
+addBtn.scripts.OnClick()
+check("selected recipe added with the window's quantity", #db.shop == 1 and db.shop[1].qty == 5, db.shop[1].qty)
+check("note updated after adding", texts():find("Auf der Werkbank: 5×", 1, true))
+check("chat line for the added recipe", prints[#prints]:find("5× auf der Werkbank", 1, true), prints[#prints])
+selected, qtyBox = 2660, 1
+fire("TRADE_SKILL_SHOW")
+check("no note for a recipe that isn't on the list", not texts():find("Auf der Werkbank: 5×", 1, true))
+addBtn.scripts.OnClick()
+check("another recipe becomes a new entry", #db.shop == 2 and db.shop[2].item == 2862 and db.shop[2].qty == 1)
+check("its craft is planned", ns.Core.list().crafts[2862] ~= nil)
+selected = 99999
+fire("TRADE_SKILL_SHOW")
+check("a recipe the database doesn't know is marked", texts():find("Nicht in der Werkbank-Datenbank", 1, true) and addBtn.enabled == false)
+addBtn.scripts.OnClick()
+check("and not added", #db.shop == 2 and prints[#prints]:find("kennt die Werkbank nicht", 1, true), prints[#prints])
+selected = 2661
+main:Hide()
+buttonWithText("Werkbank").scripts.OnClick()
+check("'Werkbank' opens the list window", main.shown)
+check("the window lists the entries", texts():find("Liste", 1, true) and texts():find("5×", 1, true), texts())
+shownButton("+").scripts.OnClick()
+check("+ adds one", db.shop[1].qty == 6, db.shop[1].qty)
+check("the profession window's note follows the list window", texts():find("Auf der Werkbank: 6×", 1, true))
+shownButton("-").scripts.OnClick()
+check("- takes one", db.shop[1].qty == 5)
+local xs = {}
+for _, f in ipairs(frames) do if f.kind == "Button" and f.text == "x" and f.shown then xs[#xs + 1] = f end end
+xs[2].scripts.OnClick()
+check("x removes the entry", #db.shop == 1 and db.shop[1].item == 2851)
+check("mail line uses a character the font has", not texts():find("→", 1, true))
+
 -- ---------- export ----------
 SlashCmdList.WERKBANK("export")
 local export = frameNamed("WerkbankExport")
@@ -311,6 +360,20 @@ check("filter 'nur Ulfrik' saved", db.ui.onlyMe == true)
 db.export = nil
 fire("PLAYER_LOGOUT")
 check("export written at logout and /reload", db.export and db.export:sub(1, 4) == "WC1;")
+
+-- ---------- clearing the list ----------
+buttonWithText("Liste leeren").scripts.OnClick()
+check("'Liste leeren' empties the list", #db.shop == 0 and ns.Core.list() == nil)
+check("the window explains how to fill it", texts():find("Auf die Werkbank“ klicken", 1, true))
+
+-- ---------- the list of addon 1.0 is taken over once ----------
+local ns2 = {}
+for line in io.lines(root .. "addon/Werkbank/Werkbank.toc") do
+  if line:match("%.lua$") then assert(loadfile(root .. "addon/Werkbank/" .. line))("Werkbank", ns2) end
+end
+WerkbankDB = { list = body .. ";" .. ns.Codec.checksum(body), chars = {} }
+fire("PLAYER_LOGIN")
+check("an old WB1 list becomes the shopping list", WerkbankDB.list == nil and WerkbankDB.shop[1] and WerkbankDB.shop[1].item == 2851)
 
 print_ = io.write(string.format("%d passed, %d failed\n", passed, failed))
 os.exit(failed == 0 and 0 or 1)

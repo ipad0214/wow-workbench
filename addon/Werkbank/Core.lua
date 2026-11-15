@@ -1,7 +1,11 @@
--- Werkbank addon: saved data, events, and netting the stock of all characters against the list.
+-- Werkbank addon: saved data, events, the shopping list, and netting the stock of all characters
+-- against the plan.
 --
 -- WerkbankDB (account-wide SavedVariables):
---   list    = the WB1 string from the website (decoded on login)
+--   shop    = { { item, r, qty } }   the shopping list: product, recipe index in Data.recipes, how often
+--             to craft it. Filled in the profession window (Craft.lua) or by /werkbank import.
+--   shopAt  = when the list last changed
+--   list    = the WB1 string of addon 1.0; turned into shop once
 --   chars   = { ["Realm-Name"] = { name, realm, at, bags, bank, mail, transit = { { at, items } } } }
 --             bank/mail: nil until the character opened them once with the addon
 --   account = { at, items }   account bank, if the client has one
@@ -9,7 +13,7 @@
 --             from this file. Only items of the list (all items while there is no list).
 --   ui      = window position and filter
 local addonName, ns = ...
-local Codec, Net, Scan = ns.Codec, ns.Net, ns.Scan
+local Data, Codec, Net, Scan, Plan = ns.Data, ns.Codec, ns.Net, ns.Scan, ns.Plan
 local Core = {}
 ns.Core = Core
 
@@ -96,11 +100,69 @@ function Core.writeExport()
   return db.export
 end
 
--- recompute the list against the stock; quiet: no chat message for rows that just got done
+-- the characters the planner may use: those with a profile (logged in since addon 1.1), by name
+function Core.planChars()
+  local out = {}
+  for _, c in pairs(db.chars) do
+    if c.profile then out[#out + 1] = { name = c.name, profs = c.profile.profs, recipes = c.profile.recipes } end
+  end
+  table.sort(out, function(a, b) return a.name < b.name end)
+  return out
+end
+
+-- ---------- the shopping list ----------
+local MAX_QTY = 999
+function Core.shop() return db.shop end
+local function shopChanged()
+  db.shopAt = time()
+  Core.update(true)
+end
+-- recipe index n, qty times more on shop (the same recipe adds up); returns the new quantity
+local function put(shop, n, qty)
+  for _, e in ipairs(shop) do
+    if e.r == n then e.qty = math.min(MAX_QTY, e.qty + qty); return e.qty end
+  end
+  shop[#shop + 1] = { item = Data.recipes[n][1], r = n, qty = math.min(MAX_QTY, qty) }
+  return shop[#shop].qty
+end
+function Core.addToShop(n, qty)
+  local total = put(db.shop, n, math.max(1, math.floor(tonumber(qty) or 1)))
+  shopChanged()
+  return total
+end
+-- how often recipe n is on the list (0: not)
+function Core.shopQty(n)
+  for _, e in ipairs(db.shop) do if e.r == n then return e.qty end end
+  return 0
+end
+-- entry i to qty; 0 removes it
+function Core.setShopQty(i, qty)
+  if not db.shop[i] then return end
+  if qty <= 0 then table.remove(db.shop, i) else db.shop[i].qty = math.min(MAX_QTY, qty) end
+  shopChanged()
+end
+function Core.clearShop()
+  db.shop = {}
+  shopChanged()
+end
+-- entries whose recipe index no longer matches its product (the database changed) get the recipe the
+-- planner picks for it
+local function normalizeShop()
+  local out = {}
+  for _, e in ipairs(db.shop) do
+    local r = Data.recipes[e.r]
+    if not (r and r[1] == e.item) then e.r = Plan.pickRecipe(Core.planChars(), e.item) end
+    if e.r then out[#out + 1] = e end
+  end
+  db.shop = out
+end
+
+-- plan the list and net the stock against it; quiet: no chat message for rows that just got done
 function Core.update(quiet)
   totals = {}
   for key, c in pairs(db.chars) do totals[key] = Core.charItems(c) end
   local before = Core.byId
+  list = #db.shop > 0 and Plan.structure(db.shop, Core.planChars(), db.shopAt) or nil
   if list then
     result = Net.evaluate(list, Core.pool())
     local by = {}
@@ -124,15 +186,21 @@ function Core.update(quiet)
     result, Core.byId = nil, {}
   end
   ns.UI.refresh()
+  if ns.Craft then ns.Craft.refresh() end   -- "Auf der Werkbank: n×" in the profession window
 end
 
--- returns true, or false and a message
+-- a WB1 list from the website replaces the shopping list: its items, planned here with the characters'
+-- profiles. Returns true, or false and a message.
 function Core.setList(text)
-  local clean = string.gsub(text or "", "[\r\n\t]", "")
-  local S, err = Codec.decodeList(clean)
+  local S, err = Codec.decodeList(string.gsub(text or "", "[\r\n\t]", ""))
   if not S then return false, err end
-  db.list, list = clean, S
-  Core.update(true)
+  local chars, shop = Core.planChars(), {}
+  for _, root in ipairs(S.roots) do
+    local e = Plan.entryFor(chars, root.id, root.need)
+    if e then put(shop, e.r, e.qty) end
+  end
+  db.shop, db.list = shop, nil
+  shopChanged()
   return true
 end
 
@@ -197,13 +265,13 @@ on("PLAYER_LOGIN", function()
   local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or string.gsub(GetRealmName(), "[%s%-]", "")
   myKey = realm .. "-" .. name
   db.chars[myKey] = db.chars[myKey] or { name = name, realm = realm, at = 0, bags = {}, transit = {} }
-  if db.list then
-    local S = Codec.decodeList(db.list)
-    list = S
-  end
+  db.shop = db.shop or {}
+  normalizeShop()
   ns.UI.init()
   scanBags()
-  Core.update(true)
+  if db.list then Core.setList(db.list) end   -- the list of addon 1.0, once
+  -- no Core.update here: Profile's PLAYER_LOGIN runs right after this one, reads the professions and
+  -- updates (planning needs them)
   if type(SendMail) == "function" then hooksecurefunc("SendMail", onSendMail) end
   if C_Mail and type(C_Mail.SendMail) == "function" then hooksecurefunc(C_Mail, "SendMail", onSendMail) end
 end)

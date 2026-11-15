@@ -19,7 +19,7 @@ ns.Profile = Profile
 local BY_NAME = {}
 for _, p in pairs(Data.profNames) do BY_NAME[string.lower(p[1])] = p[1]; BY_NAME[string.lower(p[2])] = p[1] end
 
-local function profName(line, name)
+function Profile.profName(line, name)
   return (line and Data.profNames[line] and Data.profNames[line][1]) or (name and BY_NAME[string.lower(name)]) or nil
 end
 local function pack(...) return { n = select("#", ...), ... } end
@@ -33,7 +33,7 @@ end
 function Profile.readProfessions()
   local profs, raw, via = {}, {}, nil
   local function add(name, line, rank, max)
-    local de = profName(line, name)
+    local de = Profile.profName(line, name)
     raw[#raw + 1] = { name = name, line = line, rank = rank, max = max, de = de }
     if de and rank then profs[de] = { rank, max or 0 } end
   end
@@ -58,7 +58,7 @@ function Profile.readProfessions()
 end
 
 -- ---------- learned recipes of the open profession window ----------
-local function idFromLink(link)
+function Profile.idFromLink(link)
   if not link then return nil end
   local item = tonumber(string.match(link, "item:(%d+)"))
   if item then return item end
@@ -71,17 +71,22 @@ local outputs = {}
 local function outputOf(T, id)
   if outputs[id] == nil then
     local s = call(T, "GetRecipeSchematic", id, false)
-    local out = type(s) == "table" and s.outputItemID or idFromLink(call(T, "GetRecipeItemLink", id))
+    local out = type(s) == "table" and s.outputItemID or Profile.idFromLink(call(T, "GetRecipeItemLink", id))
     outputs[id] = (out and out > 0) and out or false
   end
   return outputs[id]
 end
+-- the keys a modern recipe id can have in the database: enchants are stored by -spell id, other recipes
+-- by their item, and a newer client may name a scroll as an enchant's output, so both are returned
+function Profile.keysOf(recipeID)
+  return -recipeID, outputOf(C_TradeSkillUI, recipeID) or nil
+end
 
--- the modern client: C_TradeSkillUI. Returns the profession and { [key] = true }, or nil and why not.
-local function scanModern()
+-- the profession shown in the modern window (C_TradeSkillUI), or nil and why not: a linked
+-- profession, a guild's or an NPC's isn't this character's
+function Profile.openProfession()
   local T = C_TradeSkillUI
-  if type(T) ~= "table" or type(T.GetAllRecipeIDs) ~= "function" then return nil end
-  -- a linked profession, a guild's or an NPC's: not this character's recipes
+  if type(T) ~= "table" then return nil end
   if call(T, "IsTradeSkillLinked") or call(T, "IsTradeSkillGuild") or call(T, "IsNPCCrafting") then return nil, "fremd" end
   local name, line
   local info = call(T, "GetBaseProfessionInfo")
@@ -91,17 +96,24 @@ local function scanModern()
     local a, b = call(T, "GetTradeSkillLine")
     if type(a) == "number" then line, name = a, b else name = a end
   end
-  local prof = profName(line, name)
+  local prof = Profile.profName(line, name)
   if not prof then return nil, "Beruf unbekannt: " .. tostring(name) .. " (" .. tostring(line) .. ")" end
+  return prof
+end
+
+-- the modern client: C_TradeSkillUI. Returns the profession and { [key] = true }, or nil and why not.
+local function scanModern()
+  local T = C_TradeSkillUI
+  if type(T) ~= "table" or type(T.GetAllRecipeIDs) ~= "function" then return nil end
+  local prof, err = Profile.openProfession()
+  if not prof then return nil, err end
   local known = {}
   for _, id in ipairs(T.GetAllRecipeIDs() or {}) do
     local r = call(T, "GetRecipeInfo", id)
     if type(r) == "table" and r.learned then
-      -- the database knows enchants by -spell id, other recipes by their item; a newer client may name a
-      -- scroll as an enchant's output, so both keys are kept
-      known[-id] = true
-      local out = outputOf(T, id)
-      if out then known[out] = true end
+      local spell, item = Profile.keysOf(id)
+      known[spell] = true
+      if item then known[item] = true end
     end
   end
   return prof, known, "C_TradeSkillUI"
@@ -117,14 +129,14 @@ local function scanClassic(kind)
   end
   if type(num) ~= "function" or type(info) ~= "function" or type(link) ~= "function" or type(line) ~= "function" then return nil end
   local name = line()
-  local prof = profName(nil, name)
+  local prof = Profile.profName(nil, name)
   if not prof then return nil, "Beruf unbekannt: " .. tostring(name) end
   local known = {}
   for i = 1, num() or 0 do
     local _, a, b = info(i)
     local kindOf = kind == "craft" and b or a   -- GetCraftInfo has the subname in between
     if kindOf ~= "header" and kindOf ~= "subheader" then
-      local id = idFromLink(link(i))
+      local id = Profile.idFromLink(link(i))
       if id then known[id] = true end
     end
   end
@@ -157,7 +169,7 @@ function Profile.update()
     for prof in pairs(p.recipes) do if not profs[prof] then p.recipes[prof] = nil end end
   end
   p.at = time()
-  ns.UI.refresh()
+  Core.update(true)   -- professions decide who crafts
 end
 
 -- the recipes of the profession window that is open right now. A recipe can't be unlearned (only the
@@ -185,7 +197,7 @@ function Profile.scanRecipes(kind)
   end
   saved.at = time()
   p.recipes[prof] = saved
-  if added then ns.UI.refresh() end
+  if added then Core.update(true) end   -- learned recipes decide who crafts
 end
 
 -- ---------- /werkbank debug ----------
