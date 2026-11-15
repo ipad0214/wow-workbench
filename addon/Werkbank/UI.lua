@@ -195,9 +195,10 @@ function UI.planRows(keep)
   return rows
 end
 
--- the rows of the window: section headers, items, crafts, mail, then the characters
+-- the rows of the window: tab "Charaktere" the characters, tab "Liste" the list with farm, buy, craft, mail
 local function buildLines()
   local Core = ns.Core
+  if Core.db().ui.tab == "chars" then return charLines({}) end
   local only = Core.db().ui.onlyMe
   local rows = UI.planRows(function(i, my) return not only or i == my end)
   local out = {}
@@ -205,7 +206,7 @@ local function buildLines()
     out[1] = { header = "Noch keine Liste." }
     out[2] = { text = "Im Berufsfenster ein Rezept wählen und" }
     out[3] = { text = "„Auf die Werkbank“ klicken." }
-    return charLines(out)
+    return out
   end
   -- what is on the list, as entered: product and how often to craft it
   out[#out + 1] = { header = "Liste" }
@@ -237,7 +238,7 @@ local function buildLines()
     return { id = x.id, name = string.format("%d× %s", x.qty, UI.itemName(x.id)), who = who(x.from) .. " » " .. who(x.to),
       me = x.from == my, count = "" }
   end)
-  return charLines(out)
+  return out
 end
 
 local function statusText()
@@ -280,6 +281,10 @@ function UI.refresh()
   for i = #lines + 1, #rows do rows[i]:Hide() end
   main.content:SetHeight(math.max(1, #lines * ROW_H))
   main.status:SetText(statusText())
+  -- the list's own controls only on its tab
+  local onList = ns.Core.db().ui.tab ~= "chars"
+  for _, f in ipairs({ main.only, main.onlyLabel, main.clear }) do if onList then f:Show() else f:Hide() end end
+  if PanelTemplates_SetTab then PanelTemplates_SetTab(main, onList and 1 or 2) end
   main.onlyLabel:SetText("nur " .. ns.Core.me().name)
   main.only:SetChecked(ns.Core.db().ui.onlyMe and true or false)
   main.tracker:SetChecked(ns.Tracker.shown())
@@ -314,6 +319,7 @@ local function createMain()
   local trackerLabel = main:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   trackerLabel:SetPoint("LEFT", main.tracker, "RIGHT", 2, 0); trackerLabel:SetText("Tracker")
   local clear = CreateFrame("Button", nil, main, "UIPanelButtonTemplate")
+  main.clear = clear
   clear:SetSize(110, 20); clear:SetPoint("TOPRIGHT", -12, -28); clear:SetText("Liste leeren")
   clear:SetScript("OnClick", function()
     if #ns.Core.shop() == 0 then return end
@@ -329,6 +335,23 @@ local function createMain()
   main.status = main:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   main.status:SetPoint("BOTTOMLEFT", 14, 10); main.status:SetPoint("BOTTOMRIGHT", -14, 10)
   main.status:SetJustifyH("LEFT"); main.status:SetWordWrap(false)
+
+  -- tabs below the window: the modern client's template, else the classic one
+  local modern = C_XMLUtil and C_XMLUtil.GetTemplateInfo and C_XMLUtil.GetTemplateInfo("PanelTabButtonTemplate")
+  local prev
+  for id, t in ipairs({ { "list", "Liste" }, { "chars", "Charaktere" } }) do
+    local tab = CreateFrame("Button", "WerkbankFrameTab" .. id, main, modern and "PanelTabButtonTemplate" or "CharacterFrameTabButtonTemplate")
+    tab:SetID(id); tab:SetText(t[2])
+    if prev then tab:SetPoint("LEFT", prev, "RIGHT", modern and 3 or -16, 0) else tab:SetPoint("TOPLEFT", main, "BOTTOMLEFT", 8, 2) end
+    if PanelTemplates_TabResize then PanelTemplates_TabResize(tab, 0) end
+    tab:SetScript("OnClick", function()
+      ns.Core.db().ui.tab = t[1]
+      if PlaySound and SOUNDKIT then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB) end
+      UI.refresh()
+    end)
+    prev = tab
+  end
+  if PanelTemplates_SetNumTabs then PanelTemplates_SetNumTabs(main, 2) end
 end
 
 -- a window with a multi-line edit box and one button

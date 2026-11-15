@@ -176,12 +176,33 @@ local function texts()
   return table.concat(t, "\n")
 end
 local all = texts()
+-- what the list window shows right now: the texts of its visible rows
+local function windowText()
+  local t = {}
+  for _, f in ipairs(frames) do
+    local row = f.parentFrame
+    if f.kind == "FontString" and f.text and f.text ~= "" and row and row.shown and row.parentFrame == main.content then t[#t + 1] = f.text end
+  end
+  return table.concat(t, "\n")
+end
+-- the window on tab "Charaktere" (fn checks it), then back on "Liste"
+local function onCharsTab(fn)
+  buttonWithText("Charaktere").scripts.OnClick()
+  assert(main.shown, "onCharsTab: the list window must be open"); fn(windowText())
+  buttonWithText("Liste").scripts.OnClick()
+end
 check("window shows the farm section", all:find("Farmen", 1, true))
 check("window shows ore 3/10", all:find("3/10", 1, true), all)
 check("window shows craft rows with what's left", all:find("noch 10×", 1, true), all)
-check("window lists the characters", all:find("Charaktere", 1, true) and all:find("Stufe 60", 1, true), all)
-check("window shows skill points", all:find("Schmiedekunst", 1, true) and all:find("285/300", 1, true), all)
-check("window asks to open the profession window", all:find("Fenster öffnen", 1, true), all)
+check("tab 'Liste' leaves the characters out", not windowText():find("Stufe 60", 1, true) and windowText():find("Farmen", 1, true), windowText())
+onCharsTab(function(w)
+  check("tab 'Charaktere' lists the characters", w:find("Charaktere", 1, true) and w:find("Stufe 60", 1, true) and not w:find("Farmen", 1, true), w)
+  check("with their skill points", w:find("Schmiedekunst", 1, true) and w:find("285/300", 1, true), w)
+  check("and asks to open the profession window", w:find("Fenster öffnen", 1, true), w)
+  check("the list's own controls are hidden there", not main.only.shown and not main.clear.shown and main.tracker.shown)
+  check("the tab is remembered", db.ui.tab == "chars")
+end)
+check("back on 'Liste' its controls are back", main.only.shown and main.clear.shown and db.ui.tab == "list")
 
 -- ---------- the tracker on the screen edge ----------
 local tracker = frameNamed("WerkbankTracker")
@@ -283,7 +304,7 @@ fire("TRADE_SKILL_SHOW")
 local bs = prof.recipes["Schmiedekunst"]
 check("learned recipes saved by product", bs and bs.known[2851] and bs.known[2862])
 check("recipes not learned yet are left out", not bs.known[1234])
-check("window counts the database's recipes", texts():find("2/240 Rezepte", 1, true), texts())
+onCharsTab(function(w) check("window counts the database's recipes", w:find("2/240 Rezepte", 1, true), w) end)
 trade.linked, trade.recipes[9999][1] = true, true
 fire("TRADE_SKILL_LIST_UPDATE")
 check("a linked profession is not saved as own", not prof.recipes["Schmiedekunst"].known[1234])
@@ -308,7 +329,7 @@ fire("SKILL_LINES_CHANGED")
 check("skill point gain saved", prof.profs["Schmiedekunst"][1] == 286)
 check("a dropped profession takes its recipes", not prof.profs["Verzauberkunst"] and not prof.recipes["Verzauberkunst"])
 check("the other professions keep their recipes", prof.recipes["Schmiedekunst"].known[2851])
-check("a character without profile is listed", texts():find("Ränka", 1, true))
+onCharsTab(function(w) check("a character without profile is listed", w:find("Ränka", 1, true), w) end)
 
 -- the classic calls, for a client without GetProfessions / C_TradeSkillUI
 local modernProfs, modernTrade = GetProfessions, C_TradeSkillUI

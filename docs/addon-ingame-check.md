@@ -32,7 +32,8 @@ installing, and again after a big client patch.
 ## Characters and professions
 - [ ] `/werkbank debug` on a character with two professions → both listed with the right skill points
       and a German name after the arrow (not "nicht zugeordnet"). Note which call worked: ________
-- [ ] `/werkbank` → section "Charaktere": the character with class, level and its professions.
+- [ ] `/werkbank` → tab "Charaktere" below the window: the character with class, level and its
+      professions; tab "Liste" shows the list without them, with "nur …" and "Liste leeren".
 - [ ] Open a profession window, close it, `/werkbank debug` → "Rezepte über …" with the number of learned
       recipes, most of them "in der Datenbank". The window shows `x/y Rezepte` for that profession.
 - [ ] Enchanting: open its window too → the enchants count (they are stored by spell id).

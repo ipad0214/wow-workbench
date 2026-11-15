@@ -116,7 +116,7 @@ reach the network; the data moves as text (details and format: `docs/addon-sync.
   Checklist for a new client version: `docs/addon-ingame-check.md`.
 - **Characters:** every character that logs in with the addon saves its level, class, race, faction,
   professions with skill points, and, once its profession window was opened, the recipes it has
-  learned. All characters of the WoW account see each other's profiles (section "Charaktere" in
+  learned. All characters of the WoW account see each other's profiles (tab "Charaktere" in
   `/werkbank`); `/werkbank debug` prints what the client returns for professions.
 - **Planning in game:** the game's profession window gets the buttons "Auf die Werkbank" (puts the
   selected recipe on the list, as often as the window's quantity box says) and "Werkbank" (opens the
